@@ -22,6 +22,7 @@ import { TouchOwner, beginTouchOwnership } from '../gesture/TouchOwnership';
 import {
   addressItemLeft,
   addressPreviewOpacity,
+  addressPreviewSurfaceVisual,
   newTabPreviewVisual,
   newTabHandoffVisual,
   shouldRenderAddressHandoff,
@@ -36,6 +37,8 @@ import {
   AddressSearchBarDownloadProps,
   addressSearchBarDownloadProps
 } from './AddressSearchBar';
+
+const ADDRESS_PREVIEW_SURFACE = addressPreviewSurfaceVisual(ADDRESS_SEARCH_BAR_STYLE.cornerRadius);
 
 export function addressTabStripDownloadSnapshotForItem(
   snapshot: DownloadProgressSnapshot | undefined,
@@ -314,6 +317,7 @@ export struct AddressTabStrip {
             .width('100%')
             .height('100%')
             .backgroundColor(Color.White)
+            .borderRadius(ADDRESS_PREVIEW_SURFACE.cornerRadius)
             .opacity(this.addressBackgroundOpacity());
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(26)
@@ -325,7 +329,8 @@ export struct AddressTabStrip {
           .height(ADDRESS_SEARCH_BAR_STYLE.height)
           .position({ x: this.itemOffset(this.tabs.length), y: ADDRESS_SEARCH_BAR_TOP_PADDING })
           .backgroundColor(Color.Transparent)
-          .borderRadius(ADDRESS_SEARCH_BAR_STYLE.cornerRadius)
+          .borderRadius(ADDRESS_PREVIEW_SURFACE.cornerRadius)
+          .clip(ADDRESS_PREVIEW_SURFACE.clipsChildren)
           .hitTestBehavior(HitTestMode.None);
       }
       if (!this.overviewTransitionActive && shouldRenderAddressHandoff(

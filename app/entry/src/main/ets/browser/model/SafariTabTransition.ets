@@ -20,6 +20,12 @@ export interface NewTabPreviewVisual {
   addressBackgroundOpacity: number;
 }
 
+/** The transient address surface must clip its own background to the capsule. */
+export interface AddressPreviewSurfaceVisual {
+  cornerRadius: number;
+  clipsChildren: boolean;
+}
+
 export interface NewTabHandoffVisual {
   plusOpacity: number;
   placeholderOpacity: number;
@@ -202,6 +208,13 @@ export function newTabPreviewVisual(progress: number): NewTabPreviewVisual {
     showAddressPlus: normalized > 0,
     addressPlusOpacity: normalized,
     addressBackgroundOpacity: newTabBackgroundProgressForPullProgress(normalized)
+  };
+}
+
+export function addressPreviewSurfaceVisual(cornerRadius: number): AddressPreviewSurfaceVisual {
+  return {
+    cornerRadius: Math.max(0, finite(cornerRadius)),
+    clipsChildren: true
   };
 }
 

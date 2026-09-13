@@ -7,7 +7,8 @@ import {
   shouldRenderTabPreviewContent,
   shouldPreferStableStartPageFrame,
   newTabHandoffVisual,
-  addressPreviewOpacity
+  addressPreviewOpacity,
+  addressPreviewSurfaceVisual
 } from '../../../main/ets/browser/model/SafariTabTransition';
 import {
   addressEditorText,
@@ -51,6 +52,12 @@ export default function safariTabTransitionFeedbackTest() {
       expect(shouldRenderPendingTabPreview(TabPreviewKind.EXISTING_TAB, 0.4)).assertFalse();
       expect(shouldRenderPendingTabPreview(TabPreviewKind.NEW_TAB, 0)).assertFalse();
       expect(shouldRenderPendingTabPreview(TabPreviewKind.NEW_TAB, 0.01)).assertTrue();
+    });
+
+    it('keeps the new-tab preview surface rounded and clipping its background', 0, () => {
+      const surface = addressPreviewSurfaceVisual(12);
+      expect(surface.cornerRadius).assertEqual(12);
+      expect(surface.clipsChildren).assertTrue();
     });
 
     it('crossfades the new-tab plus into the full native placeholder', 0, () => {
