@@ -1,14 +1,34 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  BrowserSharePayload,
+  BrowserTabRecord,
+  TabResidency,
   bookmarkRecordForPage,
   committedUrlForTabState,
   displayUrlFor,
   loadableUrlFor,
   normalizeAddressInput,
+  sharePayloadForTab,
   tabOverviewTitleFor,
   urlSchemeFor,
   validateBrowserUrl
 } from '../../../main/ets/browser/model/BrowserTypes';
+
+function shareTab(url: string, lastValidUrl: string, title: string): BrowserTabRecord {
+  return {
+    id: 'share-tab',
+    url,
+    lastValidUrl,
+    displayUrl: 'example.com',
+    pageSnapshot: '',
+    title,
+    isPrivate: false,
+    createdAt: 1,
+    lastAccessedAt: 1,
+    thumbnailKey: '',
+    residency: TabResidency.HOT
+  };
+}
 
 export default function browserTypesTest() {
   describe('BrowserTypes', () => {
@@ -94,6 +114,19 @@ export default function browserTypesTest() {
       const fullUrl: string = 'https://example.com/path?query=value#section';
       expect(loadableUrlFor(fullUrl)).assertEqual(fullUrl);
       expect(urlSchemeFor(fullUrl)).assertEqual('https');
+    });
+
+    it('shares the current valid URL instead of a stale tab URL', 0, () => {
+      const payload: BrowserSharePayload | undefined = sharePayloadForTab(
+        shareTab('about:blank', 'https://example.com/current', '')
+      );
+
+      expect(payload === undefined).assertFalse();
+      if (payload !== undefined) {
+        expect(payload.url).assertEqual('https://example.com/current');
+        expect(payload.title).assertEqual('https://example.com/current');
+        expect(payload.description).assertEqual('https://example.com/current');
+      }
     });
   });
 }

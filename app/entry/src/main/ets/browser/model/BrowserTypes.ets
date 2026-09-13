@@ -36,6 +36,12 @@ export interface BrowserTabRecord {
   addressQuery?: string;
 }
 
+export interface BrowserSharePayload {
+  url: string;
+  title: string;
+  description: string;
+}
+
 export interface PendingTabDraft {
   tab: BrowserTabRecord;
 }
@@ -393,6 +399,23 @@ export function lastValidUrlForTab(tab: BrowserTabRecord): string {
   }
   const legacyUrl: string | undefined = tab.url === undefined ? undefined : loadableUrlFor(tab.url);
   return legacyUrl ?? 'about:blank';
+}
+
+/** Build the system-share record from the current navigable page identity. */
+export function sharePayloadForTab(tab: BrowserTabRecord | undefined): BrowserSharePayload | undefined {
+  if (tab === undefined) {
+    return undefined;
+  }
+  const url: string = lastValidUrlForTab(tab);
+  if (url === 'about:blank') {
+    return undefined;
+  }
+  const title: string = tab.title.trim();
+  return {
+    url,
+    title: title.length > 0 ? title : url,
+    description: url
+  };
 }
 
 /** Reject lifecycle display text without replacing the tab's last valid URL. */

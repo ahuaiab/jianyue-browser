@@ -1,6 +1,8 @@
 import { webview } from '@kit.ArkWeb';
 import { AnimatorResult, UIContext, curves } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { uniformTypeDescriptor as utd } from '@kit.ArkData';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { systemShare } from '@kit.ShareKit';
@@ -144,6 +146,7 @@ import {
   AddressBarSource,
   BrowserErrorKind,
   BrowserErrorState,
+  BrowserSharePayload,
   BrowserSessionSnapshot,
   BrowserTabRecord,
   PendingTabDraft,
@@ -162,6 +165,7 @@ import {
   normalizeAddressInput,
   searchQueryForUrl,
   searchQueryTextFor,
+  sharePayloadForTab,
   tabOverviewTitleFor,
   bookmarkRecordForPage
 } from '../model/BrowserTypes';
@@ -2994,8 +2998,8 @@ export struct BrowserShell {
 
   /** Invoke HarmonyOS system sharing for the active page URL. */
   private async shareActivePage(): Promise<void> {
-    const tab: BrowserTabRecord | undefined = this.activeTab();
-    if (tab === undefined || tab.url === 'about:blank') {
+    const payload: BrowserSharePayload | undefined = sharePayloadForTab(this.activeTab());
+    if (payload === undefined) {
       return;
     }
     const hostContext = this.getUIContext().getHostContext();
@@ -3004,18 +3008,24 @@ export struct BrowserShell {
     }
     try {
       const data: systemShare.SharedData = new systemShare.SharedData({
-        utd: 'general.hyperlink',
-        content: tab.url,
-        title: tab.title.length > 0 ? tab.title : tab.url,
+        utd: utd.UniformDataType.HYPERLINK,
+        content: payload.url,
+        title: payload.title,
         label: 'HYPERLINK',
-        description: tab.url
+        description: payload.description
       });
       const controller: systemShare.ShareController = new systemShare.ShareController(data);
       await controller.show(hostContext as common.UIAbilityContext, {
+        selectionMode: systemShare.SelectionMode.SINGLE,
         previewMode: systemShare.SharePreviewMode.DEFAULT
       });
-    } catch (_error) {
-      return;
+      hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+        'share_active_page_succeeded urlLength=%{public}d', payload.url.length);
+    } catch (error) {
+      const errorCode: number = (error as BusinessError).code ?? -1;
+      const errorMessage: string = (error as BusinessError).message ?? 'unknown';
+      hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+        'share_active_page_failed code=%{public}d message=%{public}s', errorCode, errorMessage);
     }
   }
 
