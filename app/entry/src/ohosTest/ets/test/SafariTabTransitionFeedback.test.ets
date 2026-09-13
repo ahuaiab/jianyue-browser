@@ -18,6 +18,7 @@ import {
   closedAddressEditorState,
   addressCollapsedTextPaddingFor,
   addressEditorLeftPaddingFor,
+  addressInputLeftPaddingFor,
   addressTextColorFor
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
@@ -152,6 +153,13 @@ export default function safariTabTransitionFeedbackTest() {
     it('starts the blank-page editor at the capsule content edge', 0, () => {
       expect(addressEditorLeftPaddingFor(true)).assertEqual(40);
       expect(addressEditorLeftPaddingFor(false)).assertEqual(0);
+    });
+
+    it('reserves a leading safe inset for every focused address input', 0, () => {
+      expect(addressInputLeftPaddingFor(false, true)).assertEqual(16);
+      expect(addressInputLeftPaddingFor(true, true)).assertEqual(16);
+      expect(addressInputLeftPaddingFor(true, false)).assertEqual(40);
+      expect(addressInputLeftPaddingFor(false, false)).assertEqual(0);
     });
 
     it('uses one color contract for address content and placeholders', 0, () => {

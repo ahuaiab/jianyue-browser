@@ -25,7 +25,7 @@ import {
   addressTextAlignmentFor,
   addressTextColorFor,
   addressCollapsedTextPaddingFor,
-  addressEditorLeftPaddingFor,
+  addressInputLeftPaddingFor,
   placeholderForFocus,
   syncAddressDraft
 } from '../model/BrowserInteraction';
@@ -328,7 +328,7 @@ export struct AddressSearchBar {
     Stack() {
       Row({ space: 8 }) {
         Stack({ alignContent: Alignment.TopStart }) {
-          if (!this.isStartPage()) {
+          if (!this.isStartPage() && !this.addressInputFocused) {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Stack({ alignContent: Alignment.TopStart }) {
                 if (this.downloadRingProps().visible) {
@@ -448,7 +448,7 @@ export struct AddressSearchBar {
             .backgroundColor(Color.Transparent)
             .padding({
               left: addressTextAlignmentFor(this.editorActive) === 'start'
-                ? addressEditorLeftPaddingFor(!this.isStartPage())
+                ? addressInputLeftPaddingFor(!this.isStartPage(), this.addressInputFocused)
                 : 0,
               right: addressClearButtonVisibleFor(
                 this.editorActive,

@@ -57,6 +57,8 @@ export const SAFARI_BOTTOM_CHROME_RAIL_INSET_VP: number = SAFARI_BOTTOM_CHROME_R
 export const SAFARI_ADDRESS_ITEM_INSET_VP: number = 8;
 /** Reserve room for the security control before collapsed web-address text. */
 export const SAFARI_ADDRESS_LOCK_SAFE_INSET_VP: number = 40;
+/** Keep focused address text and the native caret inside the capsule edge. */
+export const SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP: number = 16;
 export const SAFARI_BOTTOM_CHROME_ACTION_COUNT: number = 5;
 
 function finiteVisualMetric(value: number): number {

@@ -3,7 +3,10 @@ import {
   loadableUrlFor,
   searchQueryTextFor
 } from './BrowserTypes';
-import { SAFARI_ADDRESS_LOCK_SAFE_INSET_VP } from './BrowserVisualMetrics';
+import {
+  SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP,
+  SAFARI_ADDRESS_LOCK_SAFE_INSET_VP
+} from './BrowserVisualMetrics';
 
 /**
  * Returns whether the embedded ArkWeb surface should participate in hit
@@ -329,6 +332,20 @@ export interface AddressTextPadding {
 /** Keep editable web-address text clear of the leading security control. */
 export function addressEditorLeftPaddingFor(hasSecurityControl: boolean): number {
   return hasSecurityControl ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP : 0;
+}
+
+/**
+ * A focused native editor has no leading security icon, but it still needs a
+ * stable inset so its caret cannot be clipped by the capsule or transition
+ * layer. Unfocused web addresses keep the existing security-control spacing.
+ */
+export function addressInputLeftPaddingFor(
+  hasSecurityControl: boolean,
+  focused: boolean
+): number {
+  return focused
+    ? SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP
+    : addressEditorLeftPaddingFor(hasSecurityControl);
 }
 
 /** Keep collapsed web-address text clear of the leading security control. */
