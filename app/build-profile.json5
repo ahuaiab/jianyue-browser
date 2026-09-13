@@ -6,6 +6,7 @@
         "targetSdkVersion": "26.0.0",
         "compatibleSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
+        // Keep signingConfig omitted: all debug and release HAPs are unsigned.
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,
