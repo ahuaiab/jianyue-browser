@@ -49,6 +49,13 @@ export function normalizeStartPageBackgroundScale(value: number | undefined): nu
   return Math.max(MIN_START_PAGE_BACKGROUND_SCALE, Math.min(MAX_START_PAGE_BACKGROUND_SCALE, value));
 }
 
+/** Apply one pinch gesture without allowing an old component parameter to win. */
+export function startPageBackgroundScaleForGesture(startScale: number, gestureScale: number): number {
+  const baseScale: number = normalizeStartPageBackgroundScale(startScale);
+  const safeGestureScale: number = Number.isFinite(gestureScale) && gestureScale > 0 ? gestureScale : 1;
+  return normalizeStartPageBackgroundScale(baseScale * safeGestureScale);
+}
+
 export enum AutoCloseTabsPolicy {
   NEVER = 'never',
   AFTER_ONE_DAY = 'after_one_day',

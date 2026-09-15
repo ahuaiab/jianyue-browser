@@ -12,7 +12,8 @@ import {
   availableBrowserSearchEngines,
   normalizeCustomSearchEngine,
   normalizeStartPageBackgroundPosition,
-  normalizeStartPageBackgroundScale
+  normalizeStartPageBackgroundScale,
+  startPageBackgroundScaleForGesture
 } from '../../../main/ets/browser/model/BrowserSettings';
 import {
   StartPageItem,
@@ -163,6 +164,7 @@ import {
   BrowserLifecyclePort,
   BrowserLifecycleRegistry
 } from '../../../main/ets/browser/lifecycle/BrowserLifecyclePort';
+import { visibleContentHeight } from '../../../main/ets/browser/model/WindowAvoidance';
 
 function closed(id: string, isPrivate: boolean = false): ClosedTabRecord {
   return {
@@ -296,6 +298,18 @@ export default function videoParityModelsTest() {
       expect(settings.startPageBackgroundScale).assertEqual(2.25);
       const copied: BrowserSettings = copyBrowserSettings(settings);
       expect(copied.startPageBackgroundScale).assertEqual(2.25);
+    });
+
+    it('uses the visible page height for background crop geometry', 0, () => {
+      expect(visibleContentHeight(944, 46, 154)).assertEqual(744);
+      expect(visibleContentHeight(944, 46, 0)).assertEqual(898);
+      expect(visibleContentHeight(100, 200, 50)).assertEqual(1);
+    });
+
+    it('keeps the last pinch scale instead of reverting to a stale parameter', 0, () => {
+      expect(startPageBackgroundScaleForGesture(1, 1.75)).assertEqual(1.75);
+      expect(startPageBackgroundScaleForGesture(2.5, 1.4)).assertEqual(3);
+      expect(startPageBackgroundScaleForGesture(2, Number.NaN)).assertEqual(2);
     });
 
     it('does not reuse a start-page frame after the background changes', 0, () => {

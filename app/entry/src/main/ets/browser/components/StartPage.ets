@@ -26,6 +26,8 @@ export struct StartPage {
   @Param onAddFavorite: () => void = () => undefined;
   @Param onCustomize: () => void = () => undefined;
   @Param pageTranslateX: number = 0;
+  /** Height of the page surface that remains visible above browser chrome. */
+  @Param backgroundViewportHeight: number = 0;
 
   private itemsFor(type: StartPageItemType): StartPageItem[] {
     return sortStartPageItems(this.items.filter((item: StartPageItem) => item.type === type));
@@ -48,6 +50,12 @@ export struct StartPage {
     return startPageBackgroundSource(this.settings.startPageBackgroundId) ?? '';
   }
 
+  private backgroundHeight(): number | string {
+    return Number.isFinite(this.backgroundViewportHeight) && this.backgroundViewportHeight > 0
+      ? this.backgroundViewportHeight
+      : '100%';
+  }
+
   @Builder
   private pageBackground() {
     if (this.selectedBackgroundSource().length === 0) {
@@ -64,7 +72,8 @@ export struct StartPage {
       })
         .id('start-page-background-image')
         .width('100%')
-        .height('100%');
+        .height(this.backgroundHeight())
+        .position({ x: 0, y: 0 });
     }
   }
 
@@ -202,7 +211,7 @@ export struct StartPage {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.TopStart }) {
       this.pageBackground();
       Scroll() {
         Column({ space: 22 }) {

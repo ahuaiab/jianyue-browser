@@ -4,7 +4,8 @@ import {
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
   StartPageBackgroundPosition,
   normalizeStartPageBackgroundPosition,
-  normalizeStartPageBackgroundScale
+  normalizeStartPageBackgroundScale,
+  startPageBackgroundScaleForGesture
 } from '../model/BrowserSettings';
 
 /**
@@ -32,6 +33,7 @@ export struct StartPageBackgroundImage {
     y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
   };
   private pinchStartScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
+  private pinchCurrentScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
   private pinchActive: boolean = false;
 
   private hasImageMetrics(): boolean {
@@ -157,6 +159,7 @@ export struct StartPageBackgroundImage {
       return;
     }
     this.pinchStartScale = this.normalizedScale();
+    this.pinchCurrentScale = this.pinchStartScale;
     this.pinchActive = true;
   }
 
@@ -165,7 +168,8 @@ export struct StartPageBackgroundImage {
       return;
     }
     const gestureScale: number = event?.scale ?? 1;
-    this.onScaleChange(normalizeStartPageBackgroundScale(this.pinchStartScale * gestureScale));
+    this.pinchCurrentScale = startPageBackgroundScaleForGesture(this.pinchStartScale, gestureScale);
+    this.onScaleChange(this.pinchCurrentScale);
   }
 
   private finishPinch(): void {
@@ -173,7 +177,10 @@ export struct StartPageBackgroundImage {
       return;
     }
     this.pinchActive = false;
-    this.onScaleChange(normalizeStartPageBackgroundScale(this.backgroundScale));
+    // @Param can still contain the value from before the last update when the
+    // gesture-end callback arrives. Keep the locally accumulated value so the
+    // preview and the saved page use the same final scale.
+    this.onScaleChange(this.pinchCurrentScale);
   }
 
   private cancelPinch(): void {
@@ -181,7 +188,8 @@ export struct StartPageBackgroundImage {
       return;
     }
     this.pinchActive = false;
-    this.onScaleChange(this.pinchStartScale);
+    this.pinchCurrentScale = this.pinchStartScale;
+    this.onScaleChange(this.pinchCurrentScale);
   }
 
   @Builder

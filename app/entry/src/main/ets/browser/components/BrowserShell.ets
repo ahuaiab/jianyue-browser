@@ -96,7 +96,7 @@ import {
   tabOverviewBottomChromeZIndex,
 } from '../model/TabOverviewActions';
 import {
-  availableContentHeight,
+  visibleContentHeight,
   topContentInsetFromAvoidRects
 } from '../model/WindowAvoidance';
 import {
@@ -5027,6 +5027,7 @@ export struct BrowserShell {
             viewportWidth: this.viewportWidth,
             viewportHeight: this.viewportHeight,
             topContentInset: this.topAvoidInset,
+            bottomContentInset: this.shouldRenderBottomBrowserBar() ? this.bottomBrowserBarHeight() : 0,
             currentX: this.pageTranslateXForRender(),
             previewX: this.adjacentTranslateXForRender(),
             currentHost: this.hostControllers.get(this.sceneActiveTabId),
@@ -5361,7 +5362,11 @@ export struct BrowserShell {
             backgroundPosition: this.pendingStartPageBackgroundPosition,
             backgroundScale: this.pendingStartPageBackgroundScale,
             pageViewportWidth: this.viewportWidth,
-            pageViewportHeight: availableContentHeight(this.viewportHeight, this.topAvoidInset),
+            pageViewportHeight: visibleContentHeight(
+              this.viewportHeight,
+              this.topAvoidInset,
+              this.shouldRenderBottomBrowserBar() ? this.bottomBrowserBarHeight() : 0
+            ),
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
             onPositionChange: (position: StartPageBackgroundPosition) => {

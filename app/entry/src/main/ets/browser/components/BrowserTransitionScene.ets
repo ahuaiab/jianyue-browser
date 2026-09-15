@@ -22,7 +22,7 @@ import {
 } from '../model/TabOverviewActions';
 import { shouldRenderTabPreviewContent } from '../model/SafariTabTransition';
 import { WebNodeHostController } from '../web/WebTabNode';
-import { availableContentHeight } from '../model/WindowAvoidance';
+import { availableContentHeight, visibleContentHeight } from '../model/WindowAvoidance';
 
 /**
  * Native ArkUI page scene for Safari-style tab transitions.
@@ -37,6 +37,7 @@ export struct BrowserTransitionScene {
   @Param viewportWidth: number = 400;
   @Param viewportHeight: number = 800;
   @Param topContentInset: number = 0;
+  @Param bottomContentInset: number = 0;
   @Param currentX: number = 0;
   @Param previewX: number = 0;
   @Param currentHost: WebNodeHostController | undefined = undefined;
@@ -95,6 +96,10 @@ export struct BrowserTransitionScene {
 
   private pageContentHeight(): number {
     return availableContentHeight(this.viewportHeight, this.topContentInset);
+  }
+
+  private backgroundViewportHeight(): number {
+    return visibleContentHeight(this.viewportHeight, this.topContentInset, this.bottomContentInset);
   }
 
   private pageContentTop(): number {
@@ -224,7 +229,8 @@ export struct BrowserTransitionScene {
             pageTranslateX: 0,
             onOpen: this.onOpen,
             onAddFavorite: this.onAddFavorite,
-            onCustomize: this.onCustomize
+            onCustomize: this.onCustomize,
+            backgroundViewportHeight: this.backgroundViewportHeight()
           })
             .width('100%')
             .height('100%')
@@ -288,7 +294,8 @@ export struct BrowserTransitionScene {
         StartPage({
           items: this.currentItems,
           settings: this.settings,
-          pageTranslateX: 0
+          pageTranslateX: 0,
+          backgroundViewportHeight: this.backgroundViewportHeight()
         })
           .width('100%')
           .height('100%')
