@@ -11,6 +11,18 @@
     {
       "name": "EntryAbility_label",
       "value": "简悦"
+    },
+    {
+      "name": "web_camera_permission_reason",
+      "value": "网页需要使用摄像头"
+    },
+    {
+      "name": "web_microphone_permission_reason",
+      "value": "网页需要使用麦克风"
+    },
+    {
+      "name": "web_location_permission_reason",
+      "value": "网页需要获取位置信息"
     }
   ]
 }

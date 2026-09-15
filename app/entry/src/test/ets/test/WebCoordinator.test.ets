@@ -10,7 +10,8 @@ import {
   PermissionDecision,
   PermissionPromptPort,
   WebPermissionCoordinator,
-  WebResourceKind
+  WebResourceKind,
+  webResourceKindForProtectedResource
 } from '../../../main/ets/browser/web/WebPermissionCoordinator';
 
 class PromptFixture implements PermissionPromptPort {
@@ -56,6 +57,17 @@ function downloadRequest(): BrowserDownloadRequest {
 
 export default function webCoordinatorTest() {
   describe('WebPermissionCoordinator', () => {
+    it('maps ArkWeb protected resources to supported browser permission kinds', 0, () => {
+      expect(webResourceKindForProtectedResource('TYPE_VIDEO_CAPTURE'))
+        .assertEqual(WebResourceKind.CAMERA);
+      expect(webResourceKindForProtectedResource('TYPE_AUDIO_CAPTURE'))
+        .assertEqual(WebResourceKind.MICROPHONE);
+      expect(webResourceKindForProtectedResource('TYPE_GEOLOCATION'))
+        .assertEqual(WebResourceKind.GEOLOCATION);
+      expect(webResourceKindForProtectedResource('TYPE_SENSOR'))
+        .assertEqual(WebResourceKind.UNSUPPORTED);
+    });
+
     it('remembers normal decisions but keeps private decisions separate', 0, async () => {
       const prompt: PromptFixture = new PromptFixture();
       const coordinator: WebPermissionCoordinator = new WebPermissionCoordinator(prompt);

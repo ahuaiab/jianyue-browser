@@ -76,6 +76,14 @@ export class BrowserRepository {
     await this.store.flush();
   }
 
+  /** Clear both session slots so a destroyed browser window cannot restore old tabs. */
+  async clearSession(): Promise<void> {
+    await this.store.putString(SLOT_A_KEY, '');
+    await this.store.putString(SLOT_B_KEY, '');
+    await this.store.putString(ACTIVE_SLOT_KEY, 'a');
+    await this.store.flush();
+  }
+
   async recordHistory(record: HistoryRecord, isPrivate: boolean): Promise<void> {
     if (isPrivate || !this.validHistory(record)) {
       return;

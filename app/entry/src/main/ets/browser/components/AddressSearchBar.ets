@@ -100,7 +100,6 @@ export struct AddressSearchBar {
   @Param initialDraft: string = '';
   @Param inputIdentity: string = 'unknown';
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
-  @Param readerMode: boolean = false;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
   @Param downloadActive: boolean = false;

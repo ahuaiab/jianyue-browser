@@ -2,6 +2,8 @@ export interface BrowserLifecyclePort {
   /** Reattach the active web surface after the ability returns to foreground. */
   onForeground(): void;
   onBackground(): Promise<void>;
+  /** Close tabs and release browser-owned caches before the window is gone. */
+  onWindowStageDestroy(): Promise<void>;
   onMemoryPressure(level: number): void;
   onExternalUrl(url: string): void;
   /**
@@ -28,6 +30,10 @@ export class BrowserLifecycleRegistry {
 
   static async onBackground(): Promise<void> {
     await BrowserLifecycleRegistry.active?.onBackground();
+  }
+
+  static async onWindowStageDestroy(): Promise<void> {
+    await BrowserLifecycleRegistry.active?.onWindowStageDestroy();
   }
 
   static onForeground(): void {

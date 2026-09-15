@@ -57,10 +57,7 @@ export function startPageBackgroundScaleForGesture(startScale: number, gestureSc
 }
 
 export enum AutoCloseTabsPolicy {
-  NEVER = 'never',
-  AFTER_ONE_DAY = 'after_one_day',
-  AFTER_ONE_WEEK = 'after_one_week',
-  AFTER_ONE_MONTH = 'after_one_month'
+  ON_BROWSER_CLOSE = 'on_browser_close'
 }
 
 /** Retained for persisted-settings compatibility; the app follows system appearance. */
@@ -88,7 +85,7 @@ export interface BrowserSettings {
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   searchEngine: BrowserSearchEngine.BING,
   customSearchEngine: undefined,
-  autoCloseTabs: AutoCloseTabsPolicy.NEVER,
+  autoCloseTabs: AutoCloseTabsPolicy.ON_BROWSER_CLOSE,
   contentBlockingEnabled: false,
   showFavorites: false,
   showFrequentSites: false,
@@ -171,11 +168,10 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
     : candidate.searchEngine === BrowserSearchEngine.CUSTOM && customSearchEngine !== undefined
       ? BrowserSearchEngine.CUSTOM
       : BrowserSearchEngine.BING;
-  const autoCloseTabs: AutoCloseTabsPolicy = candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_DAY ||
-    candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_WEEK ||
-    candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_MONTH
-    ? candidate.autoCloseTabs
-    : AutoCloseTabsPolicy.NEVER;
+  // Older releases stored interval policies. The browser now closes all
+  // open tabs when its window is destroyed, so migrate every old value to the
+  // single supported policy instead of retaining a setting that is ignored.
+  const autoCloseTabs: AutoCloseTabsPolicy = AutoCloseTabsPolicy.ON_BROWSER_CLOSE;
   // Before start-page switches were user-configurable, persisted settings
   // contained both flags as true without a marker. Treat that shape as the
   // old default so an upgrade starts with only the Edit action visible.

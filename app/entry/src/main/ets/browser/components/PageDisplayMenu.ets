@@ -14,7 +14,6 @@ import { SymbolGlyphModifier } from '@kit.ArkUI';
 @ComponentV2
 export struct PageDisplayMenu {
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
-  @Param readerMode: boolean = false;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
   @Param onFontSize: (size: PageFontSize) => void = (_size: PageFontSize) => undefined;

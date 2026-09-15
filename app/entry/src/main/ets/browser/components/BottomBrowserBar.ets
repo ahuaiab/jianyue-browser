@@ -45,7 +45,6 @@ export struct BottomBrowserBar {
   @Param addressInputFocusEnabled: boolean = true;
   @Param inputFocusRequestToken: number = 0;
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
-  @Param readerMode: boolean = false;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
   @Param previewKind: TabPreviewKind = TabPreviewKind.NONE;
@@ -106,7 +105,7 @@ export struct BottomBrowserBar {
           activeInputIdentity: this.activeInputIdentity,
           addressInputFocusEnabled: this.addressInputFocusEnabled,
           inputFocusRequestToken: this.inputFocusRequestToken, selectedFontSize: this.selectedFontSize,
-          readerMode: this.readerMode, webReady: this.webReady, desktopMode: this.desktopMode,
+          webReady: this.webReady, desktopMode: this.desktopMode,
           downloadProgress: bottomBrowserBarDownloadSnapshot(this.downloadProgress),
           onNavigate: this.onNavigate, onReload: this.onReload, onOpenAddress: this.onOpenAddress,
           onAddressChange: this.onAddressChange, onInputFocusChange: this.onInputFocusChange,

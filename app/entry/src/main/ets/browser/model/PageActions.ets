@@ -1,16 +1,9 @@
 import { PageFontSize } from './PageDisplayState';
 
 export enum PageAction {
-  READER = 'reader',
-  TRANSLATE = 'translate',
-  SCREENSHOT = 'screenshot',
   BOOKMARK = 'bookmark',
   DOWNLOAD_MANAGER = 'download_manager',
-  DESKTOP_SITE = 'desktop_site',
-  MEDIA_SPEED_HALF = 'media_speed_half',
-  MEDIA_SPEED_STANDARD = 'media_speed_standard',
-  MEDIA_SPEED_ONE_HALF = 'media_speed_one_half',
-  MEDIA_SPEED_DOUBLE = 'media_speed_double'
+  DESKTOP_SITE = 'desktop_site'
 }
 
 export interface PageActionAvailability {
@@ -35,11 +28,6 @@ export function nextFontSize(size: PageFontSize): PageFontSize {
   return PageFontSize.SMALL;
 }
 
-/**
- * ArkWeb does not expose one cross-version reader/translation API. Keep the
- * availability decision explicit so the UI can show a native fallback rather
- * than claiming that an unavailable operation succeeded.
- */
 export function availablePageActions(webReady: boolean): PageActionAvailability {
   if (!webReady) {
     return {

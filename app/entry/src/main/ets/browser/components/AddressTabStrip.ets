@@ -77,7 +77,6 @@ export struct AddressTabStrip {
   @Param overviewChromeFrame: TabOverviewChromeFrame | undefined = undefined;
   @Param inputFocusRequestToken: number = 0;
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
-  @Param readerMode: boolean = false;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
   @Param onNavigate: (value: string) => void = (_value: string) => undefined;
@@ -253,7 +252,6 @@ export struct AddressTabStrip {
       initialDraft: index === this.activeIndex ? this.addressDraft : '',
       inputIdentity: index === this.activeIndex ? this.activeInputIdentity : `address-input-${tab.id}`,
       selectedFontSize: this.selectedFontSize,
-      readerMode: this.readerMode,
       webReady: index === this.activeIndex && this.webReady,
       desktopMode: index === this.activeIndex && this.desktopMode,
       downloadActive: addressSearchBarDownloadProps(

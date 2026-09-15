@@ -4,6 +4,7 @@ import {
   BrowserSettings,
   BrowserSearchEngine,
   CustomSearchEngine,
+  StartPageBackgroundPosition,
   DEFAULT_BROWSER_SETTINGS,
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
@@ -229,6 +230,8 @@ class FakeBackPort implements BrowserLifecyclePort {
 
   async onBackground(): Promise<void> {}
 
+  async onWindowStageDestroy(): Promise<void> {}
+
   onForeground(): void {
     this.foregroundCount += 1;
   }
@@ -243,22 +246,27 @@ class FakeBackPort implements BrowserLifecyclePort {
 }
 
 interface SettingsFixture {
-  searchEngine: BrowserSearchEngine;
-  showFavorites: boolean;
-  showFrequentSites: boolean;
+  searchEngine?: BrowserSearchEngine | string;
+  customSearchEngine?: CustomSearchEngine;
+  autoCloseTabs?: string;
+  contentBlockingEnabled?: boolean;
+  showFavorites?: boolean;
+  showFrequentSites?: boolean;
   startPageSectionsConfigured?: boolean;
+  startPageBackgroundId?: string;
+  startPageBackgroundPosition?: StartPageBackgroundPosition;
+  startPageBackgroundScale?: number;
 }
 
 export default function videoParityModelsTest() {
   describe('VideoParityModels', () => {
     it('provides Safari-like display and start-page defaults', 0, () => {
       expect(DEFAULT_BROWSER_SETTINGS.searchEngine).assertEqual('bing');
-      expect(DEFAULT_BROWSER_SETTINGS.autoCloseTabs).assertEqual('never');
+      expect(DEFAULT_BROWSER_SETTINGS.autoCloseTabs).assertEqual('on_browser_close');
       expect(DEFAULT_BROWSER_SETTINGS.showFavorites).assertFalse();
       expect(DEFAULT_BROWSER_SETTINGS.showFrequentSites).assertFalse();
       expect(startPageBackgroundSource(DEFAULT_BROWSER_SETTINGS.startPageBackgroundId)).assertUndefined();
       expect(DEFAULT_PAGE_DISPLAY_STATE.fontSize).assertEqual(PageFontSize.STANDARD);
-      expect(DEFAULT_PAGE_DISPLAY_STATE.readerMode).assertFalse();
     });
 
     it('keeps a selected gallery URI as the start-page background source', 0, () => {
@@ -271,14 +279,16 @@ export default function videoParityModelsTest() {
     it('normalizes and persists the start-page background position', 0, () => {
       expect(DEFAULT_START_PAGE_BACKGROUND_POSITION.x).assertEqual(0.5);
       expect(DEFAULT_START_PAGE_BACKGROUND_POSITION.y).assertEqual(0.5);
-      const normalized = normalizeStartPageBackgroundPosition({ x: 1.8, y: -0.4 } as Object);
+      const outOfRangePosition: StartPageBackgroundPosition = { x: 1.8, y: -0.4 };
+      const normalized = normalizeStartPageBackgroundPosition(outOfRangePosition as Object);
       expect(normalized.x).assertEqual(1);
       expect(normalized.y).assertEqual(0);
 
-      const settings: BrowserSettings = normalizeBrowserSettings({
+      const settingsInput: SettingsFixture = {
         startPageBackgroundId: 'datashare:///media/Photo/001.jpg',
         startPageBackgroundPosition: { x: 0.2, y: 0.8 }
-      } as Object);
+      };
+      const settings: BrowserSettings = normalizeBrowserSettings(settingsInput as Object);
       expect(settings.startPageBackgroundPosition.x).assertEqual(0.2);
       expect(settings.startPageBackgroundPosition.y).assertEqual(0.8);
       const copied: BrowserSettings = copyBrowserSettings(settings);
@@ -291,10 +301,11 @@ export default function videoParityModelsTest() {
       expect(normalizeStartPageBackgroundScale(0.2)).assertEqual(1);
       expect(normalizeStartPageBackgroundScale(4.5)).assertEqual(3);
 
-      const settings: BrowserSettings = normalizeBrowserSettings({
+      const settingsInput: SettingsFixture = {
         startPageBackgroundId: 'datashare:///media/Photo/001.jpg',
         startPageBackgroundScale: 2.25
-      } as Object);
+      };
+      const settings: BrowserSettings = normalizeBrowserSettings(settingsInput as Object);
       expect(settings.startPageBackgroundScale).assertEqual(2.25);
       const copied: BrowserSettings = copyBrowserSettings(settings);
       expect(copied.startPageBackgroundScale).assertEqual(2.25);
@@ -337,10 +348,11 @@ export default function videoParityModelsTest() {
       expect(builtIns[0]).assertEqual(BrowserSearchEngine.BING);
       expect(builtIns[1]).assertEqual(BrowserSearchEngine.BAIDU);
 
-      const custom: CustomSearchEngine | undefined = normalizeCustomSearchEngine({
+      const customInput: CustomSearchEngine = {
         name: '自定义搜索',
         urlTemplate: 'https://search.example/?q=%s'
-      } as Object);
+      };
+      const custom: CustomSearchEngine | undefined = normalizeCustomSearchEngine(customInput as Object);
       expect(custom === undefined).assertFalse();
       if (custom !== undefined) {
         const engines: BrowserSearchEngine[] = availableBrowserSearchEngines(custom);
@@ -349,19 +361,25 @@ export default function videoParityModelsTest() {
         expect(searchEngineLabel(BrowserSearchEngine.CUSTOM, custom)).assertEqual('自定义搜索');
         expect(searchUrlForEngine(BrowserSearchEngine.CUSTOM, '鸿蒙 浏览器', custom))
           .assertEqual('https://search.example/?q=%E9%B8%BF%E8%92%99%20%E6%B5%8F%E8%A7%88%E5%99%A8');
-        const customSettings: BrowserSettings = normalizeBrowserSettings({
+        const customSettingsInput: SettingsFixture = {
           searchEngine: BrowserSearchEngine.CUSTOM,
           customSearchEngine: custom
-        } as Object);
+        };
+        const customSettings: BrowserSettings = normalizeBrowserSettings(customSettingsInput as Object);
         expect(customSettings.searchEngine).assertEqual(BrowserSearchEngine.CUSTOM);
         expect(customSettings.customSearchEngine?.urlTemplate).assertEqual(custom.urlTemplate);
       }
 
-      const migrated: BrowserSettings = normalizeBrowserSettings({ searchEngine: 'google' } as Object);
+      const migratedInput: SettingsFixture = { searchEngine: 'google' };
+      const migrated: BrowserSettings = normalizeBrowserSettings(migratedInput as Object);
       expect(migrated.searchEngine).assertEqual(BrowserSearchEngine.BING);
       expect(searchUrlForEngine('google' as BrowserSearchEngine, 'legacy'))
         .assertEqual('https://cn.bing.com/search?q=legacy');
-      expect(normalizeCustomSearchEngine({ name: '无效', urlTemplate: 'https://example.com/search' } as Object))
+      const invalidCustomInput: CustomSearchEngine = {
+        name: '无效',
+        urlTemplate: 'https://example.com/search'
+      };
+      expect(normalizeCustomSearchEngine(invalidCustomInput as Object))
         .assertUndefined();
     });
 
@@ -390,6 +408,12 @@ export default function videoParityModelsTest() {
       const selected: BrowserSettings = normalizeBrowserSettings(selectedValue as Object);
       expect(selected.showFavorites).assertTrue();
       expect(selected.showFrequentSites).assertFalse();
+    });
+
+    it('migrates every legacy automatic tab-close interval to browser-close cleanup', 0, () => {
+      const migratedInput: SettingsFixture = { autoCloseTabs: 'after_one_day' };
+      const migrated: BrowserSettings = normalizeBrowserSettings(migratedInput as Object);
+      expect(migrated.autoCloseTabs).assertEqual('on_browser_close');
     });
 
     it('keeps an enabled favorites section visible before the first favorite is added', 0, () => {
@@ -438,12 +462,9 @@ export default function videoParityModelsTest() {
     it('normalizes an invalid display state to a safe copy', 0, () => {
       const state: PageDisplayState = {
         fontSize: PageFontSize.LARGE,
-        readerMode: true,
-        translated: true,
         fullScreen: false
       };
       expect(state.fontSize).assertEqual(PageFontSize.LARGE);
-      expect(state.readerMode).assertTrue();
     });
 
     it('persists settings, start-page items and recently closed tabs', 0, async () => {
@@ -521,9 +542,7 @@ export default function videoParityModelsTest() {
       expect(ready.enabled.length).assertEqual(2);
       expect(ready.enabled.includes(PageAction.DOWNLOAD_MANAGER)).assertTrue();
       expect(ready.enabled.includes(PageAction.DESKTOP_SITE)).assertTrue();
-      expect(ready.enabled.includes(PageAction.SCREENSHOT)).assertFalse();
       expect(ready.enabled.includes(PageAction.BOOKMARK)).assertFalse();
-      expect(ready.enabled.includes(PageAction.MEDIA_SPEED_DOUBLE)).assertFalse();
       expect(pageMenuActions(true).length).assertEqual(2);
       expect(pageMenuActions(true)[0]).assertEqual(PageAction.DOWNLOAD_MANAGER);
       expect(pageMenuActions(true)[1]).assertEqual(PageAction.DESKTOP_SITE);
@@ -531,7 +550,6 @@ export default function videoParityModelsTest() {
       expect(pageMenuActions(false).length).assertEqual(1);
       expect(pageMenuActions(false)[0]).assertEqual(PageAction.DOWNLOAD_MANAGER);
       expect(unavailable.enabled.includes(PageAction.DOWNLOAD_MANAGER)).assertTrue();
-      expect(unavailable.enabled.includes(PageAction.SCREENSHOT)).assertFalse();
       expect(unavailable.reason.length > 0).assertTrue();
       expect(pageModeMenuLabel(false)).assertEqual('请求桌面网页');
       expect(pageModeMenuLabel(true)).assertEqual('请求手机网页');

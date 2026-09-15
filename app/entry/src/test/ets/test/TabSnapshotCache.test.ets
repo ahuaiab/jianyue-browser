@@ -77,5 +77,16 @@ export default function tabSnapshotCacheTest() {
       expect(await cache.get('same')).assertDeepEquals(bytes(2, 20));
       expect(storage.values.get('same')?.byteLength).assertEqual(20);
     });
+
+    it('clears ordinary and private snapshots together', 0, async () => {
+      const storage: FakeSnapshotStorage = new FakeSnapshotStorage();
+      const cache: TabSnapshotCache = new TabSnapshotCache(storage, 100, () => 1);
+      await cache.put('ordinary', bytes(1, 20), false);
+      await cache.put('private', bytes(2, 20), true);
+      await cache.clear();
+      expect(await cache.get('ordinary')).assertUndefined();
+      expect(await cache.get('private')).assertUndefined();
+      expect(storage.values.size).assertEqual(0);
+    });
   });
 }

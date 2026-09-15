@@ -13,6 +13,42 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:web_camera_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ]
+        }
+      },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:web_microphone_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ]
+        }
+      },
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:web_location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ]
+        }
+      },
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:web_location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ]
+        }
       }
     ],
     "abilities": [

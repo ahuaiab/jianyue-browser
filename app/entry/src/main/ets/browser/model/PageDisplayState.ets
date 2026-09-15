@@ -6,23 +6,17 @@ export enum PageFontSize {
 
 export interface PageDisplayState {
   fontSize: PageFontSize;
-  readerMode: boolean;
-  translated: boolean;
   fullScreen: boolean;
 }
 
 export const DEFAULT_PAGE_DISPLAY_STATE: PageDisplayState = {
   fontSize: PageFontSize.STANDARD,
-  readerMode: false,
-  translated: false,
   fullScreen: false
 };
 
 export function copyPageDisplayState(state: PageDisplayState): PageDisplayState {
   return {
     fontSize: state.fontSize,
-    readerMode: state.readerMode,
-    translated: state.translated,
     fullScreen: state.fullScreen
   };
 }
@@ -38,8 +32,6 @@ export function normalizePageDisplayState(value: Object | undefined): PageDispla
     : PageFontSize.STANDARD;
   return {
     fontSize,
-    readerMode: candidate.readerMode === true,
-    translated: candidate.translated === true,
     fullScreen: candidate.fullScreen === true
   };
 }

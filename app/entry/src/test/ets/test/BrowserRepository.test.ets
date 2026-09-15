@@ -65,6 +65,15 @@ export default function browserRepositoryTest() {
       expect(session?.activeTabId).assertEqual('normal');
     });
 
+    it('clears both persisted session slots for browser exit', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      await repository.saveSession(normalSession());
+      await repository.clearSession();
+      expect(await repository.loadSession()).assertUndefined();
+      expect(store.allValues().join('').includes('https://normal.example')).assertFalse();
+    });
+
     it('does not persist private tabs or private history', 0, async () => {
       const store: FakeKeyValueStore = new FakeKeyValueStore();
       const repository: BrowserRepository = new BrowserRepository(store);

@@ -21,7 +21,7 @@ import { BrowserTransitionScene } from './BrowserTransitionScene';
 import { TabOverview } from './TabOverview';
 import {
   DefaultBrowserCommandDispatcher,
-  NoopSnapshotPort,
+  TabSnapshotCachePort,
   SessionPort,
   TabRuntimePort
 } from '../command/BrowserCommandDispatcher';
@@ -37,6 +37,7 @@ import {
   WebSslError
 } from '../web/WebTabNode';
 import { WebTabPool } from '../web/WebTabPool';
+import { HarmonyWebPermissionHandler } from '../web/ArkWebPermissionHandler';
 import { MemorySnapshotStorage, TabSnapshotCache } from '../snapshot/TabSnapshotCache';
 import { BrowserRepository } from '../data/BrowserRepository';
 import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
@@ -587,6 +588,7 @@ class RepositorySessionPort implements SessionPort {
 class ShellLifecyclePort implements BrowserLifecyclePort {
   private readonly foregroundCallback: () => void;
   private readonly backgroundCallback: () => Promise<void>;
+  private readonly windowStageDestroyCallback: () => Promise<void>;
   private readonly memoryCallback: (level: number) => void;
   private readonly backCallback: () => boolean;
   private readonly externalUrlCallback: (url: string) => void;
@@ -594,12 +596,14 @@ class ShellLifecyclePort implements BrowserLifecyclePort {
   constructor(
     foregroundCallback: () => void,
     backgroundCallback: () => Promise<void>,
+    windowStageDestroyCallback: () => Promise<void>,
     memoryCallback: (level: number) => void,
     backCallback: () => boolean,
     externalUrlCallback: (url: string) => void
   ) {
     this.foregroundCallback = foregroundCallback;
     this.backgroundCallback = backgroundCallback;
+    this.windowStageDestroyCallback = windowStageDestroyCallback;
     this.memoryCallback = memoryCallback;
     this.backCallback = backCallback;
     this.externalUrlCallback = externalUrlCallback;
@@ -611,6 +615,10 @@ class ShellLifecyclePort implements BrowserLifecyclePort {
 
   async onBackground(): Promise<void> {
     await this.backgroundCallback();
+  }
+
+  async onWindowStageDestroy(): Promise<void> {
+    await this.windowStageDestroyCallback();
   }
 
   onMemoryPressure(level: number): void {
@@ -699,7 +707,7 @@ export struct BrowserShell {
   // later in aboutToAppear().
   @Local browserSettings: BrowserSettings = {
     searchEngine: BrowserSearchEngine.BING,
-    autoCloseTabs: AutoCloseTabsPolicy.NEVER,
+    autoCloseTabs: AutoCloseTabsPolicy.ON_BROWSER_CLOSE,
     contentBlockingEnabled: false,
     showFavorites: false,
     showFrequentSites: false,
@@ -718,8 +726,6 @@ export struct BrowserShell {
   @Local bookmarkItems: BookmarkRecord[] = [];
   @Local pageDisplayState: PageDisplayState = {
     fontSize: PageFontSize.STANDARD,
-    readerMode: false,
-    translated: false,
     fullScreen: false
   };
   @Local pageReady: boolean = false;
@@ -736,7 +742,6 @@ export struct BrowserShell {
   @Local showDownloadManager: boolean = false;
   @Local startPageCustomizeDismissProgress: number = 0;
   private startPageCustomizeDismissRequested: boolean = false;
-  @Local pageSnapshot: image.PixelMap | undefined = undefined;
   @Local canNavigateBack: boolean = false;
   @Local canNavigateForward: boolean = false;
   @Local navigationStateRevision: number = 0;
@@ -817,6 +822,7 @@ export struct BrowserShell {
   private downloadService: DownloadService | undefined = undefined;
   private downloadLifecycle: BrowserDownloadLifecycle | undefined = undefined;
   private lifecyclePort: BrowserLifecyclePort | undefined = undefined;
+  private browserExitCleanupPromise: Promise<void> | undefined = undefined;
   private webTabPool: WebTabPool | undefined = undefined;
   private runtimePort: ArkWebTabRuntimePort | undefined = undefined;
   private dispatcher: DefaultBrowserCommandDispatcher | undefined = undefined;
@@ -860,6 +866,9 @@ export struct BrowserShell {
     const uiContext: UIContext = this.getUIContext();
     this.observeTopAvoidArea(uiContext);
     const hostContext = uiContext.getHostContext();
+    const permissionHandler = hostContext === undefined
+      ? undefined
+      : new HarmonyWebPermissionHandler(hostContext);
     const pageLifecycleObserver: WebPageLifecycleObserver = new BrowserPageLifecycleObserver(
       (tabId: TabId, controller: webview.WebviewController) => {
         this.applyUserAgentMode(tabId, controller, false);
@@ -1104,18 +1113,20 @@ export struct BrowserShell {
           runtimeId,
           '',
           'web-src-runtime-created'
-        )
+        ),
+      permissionHandler
     ));
     this.runtimePort = new ArkWebTabRuntimePort(this.tabStore, this.webTabPool);
     this.dispatcher = new DefaultBrowserCommandDispatcher(
       this.tabStore,
       this.runtimePort,
-      new NoopSnapshotPort(),
+      new TabSnapshotCachePort(this.snapshotCache),
       new RepositorySessionPort(this.tabStore, this.repository)
     );
     this.lifecyclePort = new ShellLifecyclePort(
       () => this.handleForeground(),
       () => this.handleBackground(),
+      () => this.closeTabsForBrowserExit(),
       (level: number) => this.handleMemoryPressure(level),
       () => this.onSystemBackPress(),
       (url: string) => this.openExternalUrl(url)
@@ -1141,6 +1152,7 @@ export struct BrowserShell {
     this.mainWindow = undefined;
     this.downloadLifecycle?.stop();
     this.downloadLifecycle = undefined;
+    void this.closeTabsForBrowserExit();
     if (this.lifecyclePort !== undefined) {
       BrowserLifecycleRegistry.clear(this.lifecyclePort);
       this.lifecyclePort = undefined;
@@ -1794,8 +1806,6 @@ export struct BrowserShell {
     }
     this.pageDisplayState = {
       fontSize: this.pageDisplayState.fontSize,
-      readerMode: this.pageDisplayState.readerMode,
-      translated: this.pageDisplayState.translated,
       fullScreen: enabled
     };
     this.rememberTabViewState(tabId);
@@ -2867,8 +2877,6 @@ export struct BrowserShell {
   private onFontSize(size: PageFontSize): void {
     this.pageDisplayState = {
       fontSize: size,
-      readerMode: this.pageDisplayState.readerMode,
-      translated: this.pageDisplayState.translated,
       fullScreen: this.pageDisplayState.fullScreen
     };
     this.rememberTabViewState();
@@ -2899,14 +2907,6 @@ export struct BrowserShell {
     if (!this.pageActionsReady()) {
       return;
     }
-    if (action === PageAction.READER) {
-      void this.toggleReaderMode();
-      return;
-    }
-    if (action === PageAction.TRANSLATE) {
-      void this.translateActivePage();
-      return;
-    }
     if (action === PageAction.BOOKMARK) {
       void this.addActiveBookmark();
       return;
@@ -2915,112 +2915,6 @@ export struct BrowserShell {
       this.togglePageMode();
       return;
     }
-    if (action === PageAction.MEDIA_SPEED_HALF) {
-      void this.setMediaPlaybackRate(0.5);
-      return;
-    }
-    if (action === PageAction.MEDIA_SPEED_STANDARD) {
-      void this.setMediaPlaybackRate(1.0);
-      return;
-    }
-    if (action === PageAction.MEDIA_SPEED_ONE_HALF) {
-      void this.setMediaPlaybackRate(1.5);
-      return;
-    }
-    if (action === PageAction.MEDIA_SPEED_DOUBLE) {
-      void this.setMediaPlaybackRate(2.0);
-      return;
-    }
-    void this.capturePageForAction();
-  }
-
-  /** Apply Safari's video-speed behavior to every media element in the page. */
-  private async setMediaPlaybackRate(rate: number): Promise<void> {
-    const tab: BrowserTabRecord | undefined = this.activeTab();
-    const controller: webview.WebviewController | undefined = tab === undefined
-      ? undefined
-      : this.runtimePort?.controllerFor(tab.id);
-    if (controller === undefined) {
-      return;
-    }
-    const script: string = `(() => {
-      const media = Array.from(document.querySelectorAll('video, audio'));
-      media.forEach((element) => {
-        element.playbackRate = ${rate};
-        element.defaultPlaybackRate = ${rate};
-      });
-      return media.length > 0 ? 'applied' : 'empty';
-    })()`;
-    try {
-      const result: string = await controller.runJavaScript(script);
-      void result;
-    } catch (_error) {
-      return;
-    }
-  }
-
-  /** Apply a readable article presentation directly to the active ArkWeb page. */
-  private async toggleReaderMode(): Promise<void> {
-    const tab: BrowserTabRecord | undefined = this.activeTab();
-    const controller: webview.WebviewController | undefined = tab === undefined
-      ? undefined
-      : this.runtimePort?.controllerFor(tab.id);
-    if (controller === undefined) {
-      return;
-    }
-    const enabled: boolean = !this.pageDisplayState.readerMode;
-    const script: string = enabled
-      ? `(() => {
-          const id = 'safari-hm-reader-style';
-          let style = document.getElementById(id);
-          if (!style) {
-            style = document.createElement('style');
-            style.id = id;
-            document.head.appendChild(style);
-          }
-          style.textContent = 'html,body{background:#fff!important;color:#1d1d1f!important;}body{max-width:720px!important;margin:0 auto!important;padding:24px!important;font-size:118%!important;line-height:1.75!important;}nav,header,footer,aside,iframe,video,form,[role="banner"],[role="navigation"]{display:none!important;}img{max-width:100%!important;height:auto!important;}';
-          document.documentElement.setAttribute('data-safari-hm-reader', '1');
-          return 'on';
-        })()`
-      : `(() => {
-          const style = document.getElementById('safari-hm-reader-style');
-          if (style) style.remove();
-          document.documentElement.removeAttribute('data-safari-hm-reader');
-          return 'off';
-        })()`;
-    try {
-      const result: string = await controller.runJavaScript(script);
-      if ((enabled && result === 'on') || (!enabled && result === 'off')) {
-        this.pageDisplayState = {
-          fontSize: this.pageDisplayState.fontSize,
-          readerMode: enabled,
-          translated: this.pageDisplayState.translated,
-          fullScreen: this.pageDisplayState.fullScreen
-        };
-        this.rememberTabViewState();
-      } else {
-        return;
-      }
-    } catch (_error) {
-      return;
-    }
-  }
-
-  /** Open a translated copy through a normal ArkWeb navigation. */
-  private async translateActivePage(): Promise<void> {
-    const tab: BrowserTabRecord | undefined = this.activeTab();
-    if (tab === undefined || tab.url === 'about:blank') {
-      return;
-    }
-    const target: string = `https://translate.google.com/translate?sl=auto&tl=zh-CN&u=${encodeURIComponent(tab.url)}`;
-    this.loadAddress(target, 'translate-active-page', 'translateActivePage');
-    this.pageDisplayState = {
-      fontSize: this.pageDisplayState.fontSize,
-      readerMode: this.pageDisplayState.readerMode,
-      translated: true,
-      fullScreen: this.pageDisplayState.fullScreen
-    };
-    this.rememberTabViewState();
   }
 
   /** Invoke HarmonyOS system sharing for the active page URL. */
@@ -3054,17 +2948,6 @@ export struct BrowserShell {
       hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
         'share_active_page_failed code=%{public}d message=%{public}s', errorCode, errorMessage);
     }
-  }
-
-  private closeSnapshot(): void {
-    this.pageSnapshot = undefined;
-    this.pageDisplayState = {
-      fontSize: this.pageDisplayState.fontSize,
-      readerMode: this.pageDisplayState.readerMode,
-      translated: this.pageDisplayState.translated,
-      fullScreen: false
-    };
-    this.rememberTabViewState();
   }
 
   private async addActiveBookmark(): Promise<void> {
@@ -3180,29 +3063,6 @@ export struct BrowserShell {
     } catch (_error) {
       this.desktopModeByTab.set(tab.id, wasDesktop);
     }
-  }
-
-  private async capturePageForAction(): Promise<void> {
-    const activeTabId: TabId = this.tabStore.activeTabId;
-    let pixel: image.PixelMap | undefined = await this.captureMountedSnapshot(activeTabId);
-    if (pixel === undefined) {
-      const tab: BrowserTabRecord | undefined = this.activeTab();
-      const controller: webview.WebviewController | undefined = tab === undefined
-        ? undefined
-        : this.runtimePort?.controllerFor(tab.id);
-      if (tab !== undefined && controller !== undefined) {
-        pixel = await this.captureArkWebSnapshot(tab.id, controller);
-      }
-    }
-    this.pageSnapshot = pixel;
-    this.pageDisplayState = {
-      fontSize: this.pageDisplayState.fontSize,
-      readerMode: this.pageDisplayState.readerMode,
-      translated: this.pageDisplayState.translated,
-      // A screenshot is an overlay action; it must not put the Web component
-      // into full-screen mode or hide the browser chrome on failure.
-      fullScreen: this.pageDisplayState.fullScreen
-    };
   }
 
   private customizeStartPage(): void {
@@ -3429,6 +3289,48 @@ export struct BrowserShell {
     this.showStartPageCustomize = false;
     this.closeDownloadManager();
     this.loadAddress(url, 'library-entry', 'openLibraryEntry');
+  }
+
+  private closeTabsForBrowserExit(): Promise<void> {
+    if (this.browserExitCleanupPromise === undefined) {
+      this.browserExitCleanupPromise = this.performBrowserExitCleanup();
+    }
+    return this.browserExitCleanupPromise;
+  }
+
+  private async performBrowserExitCleanup(): Promise<void> {
+    const tabs: BrowserTabRecord[] = this.tabStore.tabs.slice();
+    for (const tab of tabs) {
+      await this.dispatcher?.closeTab(tab.id);
+      this.removeTabViewState(tab.id);
+    }
+    this.closedTabStack.clear();
+    await this.repository?.saveClosedTabs([]);
+    await this.repository?.clearSession();
+    await this.snapshotCache.clear();
+    this.thumbnails.clear();
+    this.snapshotGenerations.clear();
+    this.startPageSnapshotInFlight.clear();
+    this.snapshotInFlight.clear();
+    this.startPageThumbnail = undefined;
+    this.startPageThumbnailBackgroundId = '';
+    // Clear ArkWeb's shared RAM/ROM resource cache as part of browser-window
+    // disposal. This complements the tab snapshot cache and prevents a later
+    // browser launch from reusing resources owned by the previous session.
+    try {
+      webview.WebviewController.removeAllCache(true);
+    } catch (_error) {
+      // The web engine may already be torn down when the window is destroyed.
+    }
+    this.hostControllers.clear();
+    this.cardProgress.clear();
+    this.cardOffsets.clear();
+    this.cardHorizontalOffsets.clear();
+    this.cardEngines.clear();
+    this.cardFinished.clear();
+    this.closingCards.clear();
+    this.reorderingCards.clear();
+    this.hapticTriggered.clear();
   }
 
   private async closeAllTabs(): Promise<void> {
@@ -4966,7 +4868,6 @@ export struct BrowserShell {
         addressInputFocusEnabled: this.addressInputFocusEnabled,
         inputFocusRequestToken: this.addressFocusRequestToken,
         selectedFontSize: this.pageDisplayState.fontSize,
-        readerMode: this.pageDisplayState.readerMode,
         webReady: this.pageActionsReady(),
         desktopMode: this.desktopModeByTab.get(this.sceneActiveTabId) ?? false,
         downloadProgress: this.downloadProgressForTab(this.sceneActiveTabId),
@@ -5394,50 +5295,6 @@ export struct BrowserShell {
             );
         }
 
-        if (this.pageSnapshot !== undefined && this.overviewProgress === 0 &&
-          !this.showLibrary && !this.showStartPageCustomize && !this.showDownloadManager) {
-          Stack() {
-            Column() {
-              Row() {
-                Text('网页截图')
-                  .fontSize(16)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor('#1D1D1F')
-                  .layoutWeight(1)
-                  .textAlign(TextAlign.Center);
-                Button({ type: ButtonType.Normal, stateEffect: false }) {
-                  SymbolGlyph($r('sys.symbol.xmark'))
-                    .fontSize(18)
-                    .fontColor(['#6B7280']);
-                }
-                  .id('page-snapshot-close-button')
-                  .width(44)
-                  .height(44)
-                  .padding(0)
-                  .backgroundColor(Color.Transparent)
-                  .stateEffect(false)
-                  .onClick(() => this.closeSnapshot());
-              }
-                .width('100%')
-                .height(52)
-                .padding({ left: 12, right: 8 });
-              Image(this.pageSnapshot)
-                .width('100%')
-                .layoutWeight(1)
-                .objectFit(ImageFit.Contain)
-                .backgroundColor('#F2F2F7');
-            }
-              .width('100%')
-              .height('100%');
-          }
-            .id('page-snapshot-overlay')
-            .width('92%')
-            .height('72%')
-            .align(Alignment.Center)
-            .backgroundColor(Color.White)
-            .borderRadius(HARMONY_RADIUS_CARD)
-            .shadow({ radius: 18, color: '#55000000', offsetX: 0, offsetY: 6 });
-        }
       }
       .width('100%')
       .height('100%')

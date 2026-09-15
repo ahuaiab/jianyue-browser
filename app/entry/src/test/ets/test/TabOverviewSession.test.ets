@@ -15,8 +15,6 @@ import {
 function displayState(fontSize: PageFontSize): PageDisplayState {
   return {
     fontSize,
-    readerMode: true,
-    translated: false,
     fullScreen: false
   };
 }

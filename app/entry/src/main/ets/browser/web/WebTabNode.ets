@@ -9,6 +9,12 @@ import { webview } from '@kit.ArkWeb';
 import { BrowserTabRecord, lastValidUrlForTab, TabId } from '../model/BrowserTypes';
 import { shouldRetryWebHostAttachment } from '../model/BrowserInteraction';
 import { WebRuntimeFactory, WebRuntimeHandle } from './WebTabPool';
+import {
+  WebGeolocationEventPort,
+  WebGeolocationPort,
+  WebPermissionRequestHandler,
+  WebPermissionRequestPort
+} from './WebPermissionCoordinator';
 
 const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
@@ -74,6 +80,7 @@ class WebBuildData {
   readonly onFullScreenEnter: () => void;
   readonly onFullScreenExit: () => void;
   readonly downloadDelegate: webview.WebDownloadDelegate | undefined;
+  readonly permissionHandler: WebPermissionRequestHandler | undefined;
   private downloadDelegateInstalled: boolean = false;
 
   constructor(
@@ -89,7 +96,8 @@ class WebBuildData {
     onFullScreenEnter: () => void = () => undefined,
     onFullScreenExit: () => void = () => undefined,
     downloadDelegate: webview.WebDownloadDelegate | undefined = undefined,
-    onPageBegin: (url: string) => void = (_url: string) => undefined
+    onPageBegin: (url: string) => void = (_url: string) => undefined,
+    permissionHandler: WebPermissionRequestHandler | undefined = undefined
   ) {
     this.url = url;
     this.controller = controller;
@@ -104,6 +112,7 @@ class WebBuildData {
     this.onFullScreenEnter = onFullScreenEnter;
     this.onFullScreenExit = onFullScreenExit;
     this.downloadDelegate = downloadDelegate;
+    this.permissionHandler = permissionHandler;
   }
 
   installDownloadDelegate(): void {
@@ -120,6 +129,63 @@ class WebBuildData {
   }
 }
 
+class ArkWebPermissionRequestAdapter implements WebPermissionRequestPort {
+  private readonly originProvider: () => string;
+  private readonly resourceProvider: () => Array<string>;
+  private readonly grantCallback: (resources: Array<string>) => void;
+  private readonly denyCallback: () => void;
+
+  constructor(
+    originProvider: () => string,
+    resourceProvider: () => Array<string>,
+    grantCallback: (resources: Array<string>) => void,
+    denyCallback: () => void
+  ) {
+    this.originProvider = originProvider;
+    this.resourceProvider = resourceProvider;
+    this.grantCallback = grantCallback;
+    this.denyCallback = denyCallback;
+  }
+
+  getOrigin(): string {
+    return this.originProvider();
+  }
+
+  getAccessibleResource(): Array<string> {
+    return this.resourceProvider();
+  }
+
+  grant(resources: Array<string>): void {
+    this.grantCallback(resources);
+  }
+
+  deny(): void {
+    this.denyCallback();
+  }
+}
+
+class ArkWebGeolocationPort implements WebGeolocationPort {
+  private readonly invokeCallback: (origin: string, allow: boolean, retain: boolean) => void;
+
+  constructor(invokeCallback: (origin: string, allow: boolean, retain: boolean) => void) {
+    this.invokeCallback = invokeCallback;
+  }
+
+  invoke(origin: string, allow: boolean, retain: boolean): void {
+    this.invokeCallback(origin, allow, retain);
+  }
+}
+
+class ArkWebGeolocationEventAdapter implements WebGeolocationEventPort {
+  readonly origin: string;
+  readonly geolocation: WebGeolocationPort;
+
+  constructor(origin: string, invokeCallback: (origin: string, allow: boolean, retain: boolean) => void) {
+    this.origin = origin;
+    this.geolocation = new ArkWebGeolocationPort(invokeCallback);
+  }
+}
+
 @Builder
 function buildWebNode(data: WebBuildData) {
   Web({
@@ -132,6 +198,7 @@ function buildWebNode(data: WebBuildData) {
     .javaScriptAccess(true)
     .domStorageAccess(true)
     .multiWindowAccess(true)
+    .geolocationAccess(true)
     .onPageBegin((event) => data.onPageBegin(event?.url ?? ''))
     .onRefreshAccessedHistory((event) => data.onPageBegin(event?.url ?? ''))
     .onPageEnd(() => {
@@ -160,6 +227,35 @@ function buildWebNode(data: WebBuildData) {
     .onWindowNewExt(() => data.onWindowNew())
     .onFullScreenEnter(() => data.onFullScreenEnter())
     .onFullScreenExit(() => data.onFullScreenExit())
+    .onPermissionRequest((event) => {
+      const nativeRequest = event?.request;
+      if (nativeRequest === undefined) {
+        return;
+      }
+      if (data.permissionHandler === undefined) {
+        nativeRequest.deny();
+        return;
+      }
+      const request: WebPermissionRequestPort = new ArkWebPermissionRequestAdapter(
+        () => nativeRequest.getOrigin(),
+        () => nativeRequest.getAccessibleResource(),
+        (resources: Array<string>) => nativeRequest.grant(resources),
+        () => nativeRequest.deny()
+      );
+      data.permissionHandler.onPermissionRequest(request, data.isPrivate);
+    })
+    .onGeolocationShow((event) => {
+      if (data.permissionHandler === undefined) {
+        event.geolocation.invoke(event.origin, false, false);
+        return;
+      }
+      const geolocationEvent: WebGeolocationEventPort = new ArkWebGeolocationEventAdapter(
+        event.origin,
+        (origin: string, allow: boolean, retain: boolean) =>
+          event.geolocation.invoke(origin, allow, retain)
+      );
+      data.permissionHandler.onGeolocationShow(geolocationEvent, data.isPrivate);
+    })
     // Diagnostic-only observer. It does not consume or forward events. The
     // exact TabBar capsule records webViewClick=0 when its Block hierarchy
     // owns the stream; the WebView itself has no root-level onTouch handler.
@@ -261,15 +357,18 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
   private readonly observer: WebPageLifecycleObserver | undefined;
   private readonly downloadHandler: WebDownloadHandler | undefined;
   private readonly runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined;
+  private readonly permissionHandler: WebPermissionRequestHandler | undefined;
   private runtimeSequence: number = 0;
 
   constructor(uiContext: UIContext, observer: WebPageLifecycleObserver | undefined = undefined,
     downloadHandler: WebDownloadHandler | string | undefined = undefined,
-    runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined) {
+    runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined,
+    permissionHandler: WebPermissionRequestHandler | undefined = undefined) {
     this.uiContext = uiContext;
     this.observer = observer;
     this.downloadHandler = typeof downloadHandler === 'string' ? undefined : downloadHandler;
     this.runtimeCreatedObserver = runtimeCreatedObserver;
+    this.permissionHandler = permissionHandler;
   }
 
   create(tab: BrowserTabRecord): WebRuntimeHandle {
@@ -309,7 +408,8 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     builderNode.build(
       wrapBuilder<[WebBuildData]>(buildWebNode),
       new WebBuildData(sourceUrl, controller, tab.isPrivate, onPageEnd, onTitleReceive, onError, onSslError,
-        onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin)
+        onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin,
+        this.permissionHandler)
     );
     this.runtimeCreatedObserver?.(tab.id, sourceUrl, runtimeId);
     return new ArkWebRuntimeHandle(tab.id, runtimeId, controller, builderNode);

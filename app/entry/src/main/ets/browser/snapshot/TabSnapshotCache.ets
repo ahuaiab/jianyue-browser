@@ -118,6 +118,16 @@ export class TabSnapshotCache {
     await this.removeExisting(key);
   }
 
+  /** Remove all in-memory and ordinary persisted snapshot entries. */
+  async clear(): Promise<void> {
+    const keys: string[] = Array.from(this.entries.keys());
+    for (const key of keys) {
+      await this.removeExisting(key);
+    }
+    this.entries.clear();
+    this.ordinaryBytes = 0;
+  }
+
   async trim(): Promise<void> {
     while (this.ordinaryBytes > this.maxBytes) {
       const oldest: SnapshotEntry | undefined = this.oldestOrdinaryEntry();

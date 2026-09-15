@@ -111,7 +111,6 @@ struct SafariImmersiveChromePreview {
         AddressSearchBar({
           address: '',
           selectedFontSize: PageFontSize.STANDARD,
-          readerMode: false,
           webReady: false,
           onNavigate: (_value: string) => undefined,
           onFontSize: (_size: PageFontSize) => undefined,
@@ -152,7 +151,6 @@ struct SafariAddressSearchBarPreview {
     AddressSearchBar({
       address: '',
       selectedFontSize: PageFontSize.STANDARD,
-      readerMode: false,
       webReady: false,
       onNavigate: (_value: string) => undefined,
       onFontSize: (_size: PageFontSize) => undefined,
@@ -222,7 +220,6 @@ struct SafariStartPageChromePreview {
         AddressSearchBar({
           address: '',
           selectedFontSize: PageFontSize.STANDARD,
-          readerMode: false,
           webReady: false,
           onNavigate: (_value: string) => undefined,
           onFontSize: (_size: PageFontSize) => undefined,
@@ -266,7 +263,6 @@ struct SafariToolbarPreview {
         tabCount: 2,
         isPrivate: false,
         selectedFontSize: PageFontSize.STANDARD,
-        readerMode: false,
         webReady: true,
         onNavigate: (_value: string) => undefined,
         onBack: () => undefined,
@@ -395,7 +391,6 @@ struct SafariPageDisplayMenuPreview {
   build() {
     PageDisplayMenu({
       selectedFontSize: PageFontSize.STANDARD,
-      readerMode: false,
       webReady: true,
       onFontSize: (_size: PageFontSize) => undefined,
       onAction: (_action: PageAction) => undefined

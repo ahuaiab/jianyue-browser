@@ -1,5 +1,6 @@
 import { PendingTabDraft, TabId } from '../model/BrowserTypes';
 import { TabStore } from '../store/TabStore';
+import { TabSnapshotCache } from '../snapshot/TabSnapshotCache';
 
 export interface TabRuntimePort {
   ensureBalanced(): void;
@@ -19,6 +20,19 @@ export interface SessionPort {
 
 export class NoopSnapshotPort implements SnapshotPort {
   async remove(_tabId: TabId): Promise<void> {}
+}
+
+/** Connects tab commands to the real snapshot cache instead of a no-op port. */
+export class TabSnapshotCachePort implements SnapshotPort {
+  private readonly cache: TabSnapshotCache;
+
+  constructor(cache: TabSnapshotCache) {
+    this.cache = cache;
+  }
+
+  async remove(tabId: TabId): Promise<void> {
+    await this.cache.remove(tabId);
+  }
 }
 
 export class NoopSessionPort implements SessionPort {
