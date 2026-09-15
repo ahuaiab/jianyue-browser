@@ -22,6 +22,10 @@ export const DEFAULT_START_PAGE_BACKGROUND_POSITION: StartPageBackgroundPosition
   y: 0.5
 };
 
+export const DEFAULT_START_PAGE_BACKGROUND_SCALE: number = 1;
+export const MIN_START_PAGE_BACKGROUND_SCALE: number = 1;
+export const MAX_START_PAGE_BACKGROUND_SCALE: number = 3;
+
 export function normalizeStartPageBackgroundPosition(value: Object | undefined): StartPageBackgroundPosition {
   if (value === undefined || value === null || typeof value !== 'object') {
     return {
@@ -36,6 +40,13 @@ export function normalizeStartPageBackgroundPosition(value: Object | undefined):
     x: Math.max(0, Math.min(1, x)),
     y: Math.max(0, Math.min(1, y))
   };
+}
+
+export function normalizeStartPageBackgroundScale(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return DEFAULT_START_PAGE_BACKGROUND_SCALE;
+  }
+  return Math.max(MIN_START_PAGE_BACKGROUND_SCALE, Math.min(MAX_START_PAGE_BACKGROUND_SCALE, value));
 }
 
 export enum AutoCloseTabsPolicy {
@@ -62,6 +73,7 @@ export interface BrowserSettings {
   startPageSectionsConfigured: boolean;
   startPageBackgroundId: string;
   startPageBackgroundPosition: StartPageBackgroundPosition;
+  startPageBackgroundScale: number;
   startPageAppearance: StartPageAppearance;
   defaultFontSize: string;
 }
@@ -76,6 +88,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   startPageSectionsConfigured: false,
   startPageBackgroundId: 'system-gradient',
   startPageBackgroundPosition: DEFAULT_START_PAGE_BACKGROUND_POSITION,
+  startPageBackgroundScale: DEFAULT_START_PAGE_BACKGROUND_SCALE,
   startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
   defaultFontSize: 'standard'
 };
@@ -131,6 +144,7 @@ export function copyBrowserSettings(settings: BrowserSettings): BrowserSettings 
       x: settings.startPageBackgroundPosition.x,
       y: settings.startPageBackgroundPosition.y
     },
+    startPageBackgroundScale: normalizeStartPageBackgroundScale(settings.startPageBackgroundScale),
     // Appearance is no longer user-configurable; migrate old in-memory values too.
     startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
     defaultFontSize: settings.defaultFontSize
@@ -163,6 +177,7 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
   const startPageBackgroundPosition: StartPageBackgroundPosition = normalizeStartPageBackgroundPosition(
     candidate.startPageBackgroundPosition as Object | undefined
   );
+  const startPageBackgroundScale: number = normalizeStartPageBackgroundScale(candidate.startPageBackgroundScale);
   return {
     searchEngine,
     customSearchEngine,
@@ -176,6 +191,7 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
       ? candidate.startPageBackgroundId
       : DEFAULT_BROWSER_SETTINGS.startPageBackgroundId,
     startPageBackgroundPosition,
+    startPageBackgroundScale,
     startPageAppearance,
     defaultFontSize: typeof candidate.defaultFontSize === 'string' && candidate.defaultFontSize.length > 0
       ? candidate.defaultFontSize

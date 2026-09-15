@@ -189,6 +189,7 @@ struct SafariStartPageContentPreview {
         startPageSectionsConfigured: true,
         startPageBackgroundId: 'custom-pink',
         startPageBackgroundPosition: { x: 0.5, y: 0.5 },
+        startPageBackgroundScale: 1,
         startPageAppearance: PREVIEW_SETTINGS.startPageAppearance,
         defaultFontSize: PREVIEW_SETTINGS.defaultFontSize
       },

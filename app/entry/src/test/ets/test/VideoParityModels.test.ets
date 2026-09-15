@@ -6,11 +6,13 @@ import {
   CustomSearchEngine,
   DEFAULT_BROWSER_SETTINGS,
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
+  DEFAULT_START_PAGE_BACKGROUND_SCALE,
   copyBrowserSettings,
   normalizeBrowserSettings,
   availableBrowserSearchEngines,
   normalizeCustomSearchEngine,
-  normalizeStartPageBackgroundPosition
+  normalizeStartPageBackgroundPosition,
+  normalizeStartPageBackgroundScale
 } from '../../../main/ets/browser/model/BrowserSettings';
 import {
   StartPageItem,
@@ -280,6 +282,20 @@ export default function videoParityModelsTest() {
       const copied: BrowserSettings = copyBrowserSettings(settings);
       expect(copied.startPageBackgroundPosition.x).assertEqual(0.2);
       expect(copied.startPageBackgroundPosition.y).assertEqual(0.8);
+    });
+
+    it('normalizes and persists the start-page background scale', 0, () => {
+      expect(DEFAULT_START_PAGE_BACKGROUND_SCALE).assertEqual(1);
+      expect(normalizeStartPageBackgroundScale(0.2)).assertEqual(1);
+      expect(normalizeStartPageBackgroundScale(4.5)).assertEqual(3);
+
+      const settings: BrowserSettings = normalizeBrowserSettings({
+        startPageBackgroundId: 'datashare:///media/Photo/001.jpg',
+        startPageBackgroundScale: 2.25
+      } as Object);
+      expect(settings.startPageBackgroundScale).assertEqual(2.25);
+      const copied: BrowserSettings = copyBrowserSettings(settings);
+      expect(copied.startPageBackgroundScale).assertEqual(2.25);
     });
 
     it('does not reuse a start-page frame after the background changes', 0, () => {

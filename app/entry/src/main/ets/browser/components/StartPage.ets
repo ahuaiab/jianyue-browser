@@ -59,7 +59,8 @@ export struct StartPage {
     } else {
       StartPageBackgroundImage({
         source: this.selectedBackgroundSource(),
-        backgroundPosition: this.settings.startPageBackgroundPosition
+        backgroundPosition: this.settings.startPageBackgroundPosition,
+        backgroundScale: this.settings.startPageBackgroundScale
       })
         .id('start-page-background-image')
         .width('100%')

@@ -1,7 +1,9 @@
 import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 import {
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
-  StartPageBackgroundPosition
+  DEFAULT_START_PAGE_BACKGROUND_SCALE,
+  StartPageBackgroundPosition,
+  normalizeStartPageBackgroundScale
 } from '../model/BrowserSettings';
 import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_SHEET } from '../model/BrowserVisualMetrics';
 
@@ -10,20 +12,58 @@ import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_SHEET } from '../model/BrowserVisua
 export struct StartPageBackgroundAdjustSheet {
   @Param source: string = '';
   @Param backgroundPosition: StartPageBackgroundPosition = DEFAULT_START_PAGE_BACKGROUND_POSITION;
+  @Param backgroundScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
+  @Param pageViewportWidth: number = 1;
+  @Param pageViewportHeight: number = 1;
   @Param topInset: number = 0;
   @Param bottomInset: number = 0;
   @Param onPositionChange: (position: StartPageBackgroundPosition) => void =
     (_position: StartPageBackgroundPosition) => undefined;
+  @Param onScaleChange: (scale: number) => void = (_scale: number) => undefined;
   @Param onCancel: () => void = () => undefined;
-  @Param onComplete: (position: StartPageBackgroundPosition) => void =
-    (_position: StartPageBackgroundPosition) => undefined;
+  @Param onComplete: (position: StartPageBackgroundPosition, scale: number) => void =
+    (_position: StartPageBackgroundPosition, _scale: number) => undefined;
   @Param onSelectAnother: () => void = () => undefined;
+  @Local previewWidth: number = 0;
+  @Local previewHeight: number = 0;
+
+  private pageAspectRatio(): number {
+    const width: number = Number.isFinite(this.pageViewportWidth) && this.pageViewportWidth > 0
+      ? this.pageViewportWidth
+      : 1;
+    const height: number = Number.isFinite(this.pageViewportHeight) && this.pageViewportHeight > 0
+      ? this.pageViewportHeight
+      : 1;
+    return width / height;
+  }
+
+  private updatePreviewArea(area: Area): void {
+    const width: number = Number(area.width);
+    const height: number = Number(area.height);
+    if (Number.isFinite(width) && width > 0 && this.previewWidth !== width) {
+      this.previewWidth = width;
+    }
+    if (Number.isFinite(height) && height > 0 && this.previewHeight !== height) {
+      this.previewHeight = height;
+    }
+  }
+
+  private previewFrameWidth(): number {
+    const maxWidth: number = this.previewWidth > 0 ? this.previewWidth : this.pageViewportWidth;
+    const maxHeight: number = this.previewHeight > 0 ? this.previewHeight : this.pageViewportHeight;
+    return Math.max(1, Math.min(maxWidth, maxHeight * this.pageAspectRatio()));
+  }
+
+  private previewFrameHeight(): number {
+    return this.previewFrameWidth() / this.pageAspectRatio();
+  }
 
   private resetPosition(): void {
     this.onPositionChange({
       x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
       y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
     });
+    this.onScaleChange(DEFAULT_START_PAGE_BACKGROUND_SCALE);
   }
 
   @Builder
@@ -56,7 +96,10 @@ export struct StartPageBackgroundAdjustSheet {
         .fontSize(15)
         .fontColor('#007AFF')
         .backgroundColor(Color.Transparent)
-        .onClick(() => this.onComplete(this.backgroundPosition));
+        .onClick(() => this.onComplete(
+          this.backgroundPosition,
+          normalizeStartPageBackgroundScale(this.backgroundScale)
+        ));
     }
       .id('start-page-background-adjust-header')
       .width('100%')
@@ -103,33 +146,43 @@ export struct StartPageBackgroundAdjustSheet {
           .height(Math.max(0, Math.min(this.topInset, 8)));
         this.header();
 
-        Stack() {
-          StartPageBackgroundImage({
-            source: this.source,
-            backgroundPosition: this.backgroundPosition,
-            interactive: true,
-            onPositionChange: (position: StartPageBackgroundPosition) => this.onPositionChange(position)
-          })
-            .id('start-page-background-adjust-preview-image')
-            .width('100%')
-            .height('100%');
-          Text('拖动图片调整位置')
-            .id('start-page-background-adjust-hint')
-            .fontSize(13)
-            .fontColor(Color.White)
-            .backgroundColor('#88000000')
-            .borderRadius(16)
-            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-            .align(Alignment.Bottom)
-            .margin({ bottom: 16 });
+        Stack({ alignContent: Alignment.Center }) {
+          Stack() {
+            StartPageBackgroundImage({
+              source: this.source,
+              backgroundPosition: this.backgroundPosition,
+              backgroundScale: this.backgroundScale,
+              interactive: true,
+              onPositionChange: (position: StartPageBackgroundPosition) => this.onPositionChange(position),
+              onScaleChange: (scale: number) => this.onScaleChange(scale)
+            })
+              .id('start-page-background-adjust-preview-image')
+              .width('100%')
+              .height('100%');
+            Text('拖动或双指缩放')
+              .id('start-page-background-adjust-hint')
+              .fontSize(13)
+              .fontColor(Color.White)
+              .backgroundColor('#88000000')
+              .borderRadius(16)
+              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+              .align(Alignment.Bottom)
+              .margin({ bottom: 16 });
+          }
+            .id('start-page-background-adjust-preview-frame')
+            .width(this.previewFrameWidth())
+            .height(this.previewFrameHeight())
+            .borderRadius(HARMONY_RADIUS_CARD)
+            .clip(true)
+            .backgroundColor('#F2F2F7');
         }
           .id('start-page-background-adjust-preview')
           .layoutWeight(1)
           .width('100%')
           .margin({ left: 12, right: 12 })
-          .borderRadius(HARMONY_RADIUS_CARD)
           .clip(true)
-          .backgroundColor('#F2F2F7');
+          .backgroundColor('#F2F2F7')
+          .onAreaChange((_oldValue: Area, newValue: Area) => this.updatePreviewArea(newValue));
 
         Blank()
           .width('100%')

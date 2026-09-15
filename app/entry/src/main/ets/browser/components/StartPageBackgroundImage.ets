@@ -1,8 +1,10 @@
 import { matrix4 } from '@kit.ArkUI';
 import {
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
+  DEFAULT_START_PAGE_BACKGROUND_SCALE,
   StartPageBackgroundPosition,
-  normalizeStartPageBackgroundPosition
+  normalizeStartPageBackgroundPosition,
+  normalizeStartPageBackgroundScale
 } from '../model/BrowserSettings';
 
 /**
@@ -14,9 +16,11 @@ import {
 export struct StartPageBackgroundImage {
   @Param source: string = '';
   @Param backgroundPosition: StartPageBackgroundPosition = DEFAULT_START_PAGE_BACKGROUND_POSITION;
+  @Param backgroundScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
   @Param interactive: boolean = false;
   @Param onPositionChange: (position: StartPageBackgroundPosition) => void =
     (_position: StartPageBackgroundPosition) => undefined;
+  @Param onScaleChange: (scale: number) => void = (_scale: number) => undefined;
 
   @Local imageWidth: number = 0;
   @Local imageHeight: number = 0;
@@ -27,6 +31,8 @@ export struct StartPageBackgroundImage {
     x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
     y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
   };
+  private pinchStartScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
+  private pinchActive: boolean = false;
 
   private hasImageMetrics(): boolean {
     return this.loadedSource === this.source && this.imageWidth > 0 && this.imageHeight > 0 &&
@@ -40,32 +46,40 @@ export struct StartPageBackgroundImage {
     return Math.max(this.componentWidth / this.imageWidth, this.componentHeight / this.imageHeight);
   }
 
+  private normalizedScale(): number {
+    return normalizeStartPageBackgroundScale(this.backgroundScale);
+  }
+
+  private renderScale(): number {
+    return this.coverScale() * this.normalizedScale();
+  }
+
   private horizontalOverflow(): number {
     if (!this.hasImageMetrics()) {
       return 0;
     }
-    return Math.max(0, this.imageWidth * this.coverScale() - this.componentWidth);
+    return Math.max(0, this.imageWidth * this.renderScale() - this.componentWidth);
   }
 
   private verticalOverflow(): number {
     if (!this.hasImageMetrics()) {
       return 0;
     }
-    return Math.max(0, this.imageHeight * this.coverScale() - this.componentHeight);
+    return Math.max(0, this.imageHeight * this.renderScale() - this.componentHeight);
   }
 
   private horizontalMatrixOverflow(): number {
     if (!this.hasImageMetrics()) {
       return 0;
     }
-    return Math.max(0, this.imageWidth - this.componentWidth / this.coverScale());
+    return Math.max(0, this.imageWidth - this.componentWidth / this.renderScale());
   }
 
   private verticalMatrixOverflow(): number {
     if (!this.hasImageMetrics()) {
       return 0;
     }
-    return Math.max(0, this.imageHeight - this.componentHeight / this.coverScale());
+    return Math.max(0, this.imageHeight - this.componentHeight / this.renderScale());
   }
 
   private clamped(value: number): number {
@@ -83,9 +97,10 @@ export struct StartPageBackgroundImage {
     // already scaled overflow in the component.
     const translationX: number = -this.horizontalMatrixOverflow() * position.x;
     const translationY: number = -this.verticalMatrixOverflow() * position.y;
+    const scale: number = this.renderScale();
     return matrix4.identity()
       .translate({ x: translationX, y: translationY })
-      .scale({ x: this.coverScale(), y: this.coverScale() });
+      .scale({ x: scale, y: scale });
   }
 
   private onImageComplete(result?: ImageLoadResult): void {
@@ -121,7 +136,7 @@ export struct StartPageBackgroundImage {
   }
 
   private updatePan(event?: GestureEvent): void {
-    if (!this.interactive) {
+    if (!this.interactive || this.pinchActive) {
       return;
     }
     const horizontalOverflow: number = this.horizontalOverflow();
@@ -135,6 +150,38 @@ export struct StartPageBackgroundImage {
       ? this.clamped(this.dragStartPosition.y - offsetY / verticalOverflow)
       : this.dragStartPosition.y;
     this.onPositionChange({ x: nextX, y: nextY });
+  }
+
+  private beginPinch(): void {
+    if (!this.interactive) {
+      return;
+    }
+    this.pinchStartScale = this.normalizedScale();
+    this.pinchActive = true;
+  }
+
+  private updatePinch(event?: GestureEvent): void {
+    if (!this.interactive || !this.pinchActive) {
+      return;
+    }
+    const gestureScale: number = event?.scale ?? 1;
+    this.onScaleChange(normalizeStartPageBackgroundScale(this.pinchStartScale * gestureScale));
+  }
+
+  private finishPinch(): void {
+    if (!this.pinchActive) {
+      return;
+    }
+    this.pinchActive = false;
+    this.onScaleChange(normalizeStartPageBackgroundScale(this.backgroundScale));
+  }
+
+  private cancelPinch(): void {
+    if (!this.pinchActive) {
+      return;
+    }
+    this.pinchActive = false;
+    this.onScaleChange(this.pinchStartScale);
   }
 
   @Builder
@@ -168,6 +215,13 @@ export struct StartPageBackgroundImage {
           PanGesture({ direction: PanDirection.All, distance: 2 })
             .onActionStart(() => this.beginPan())
             .onActionUpdate((event: GestureEvent | undefined) => this.updatePan(event))
+        )
+        .parallelGesture(
+          PinchGesture({ fingers: 2, distance: 5 })
+            .onActionStart(() => this.beginPinch())
+            .onActionUpdate((event: GestureEvent | undefined) => this.updatePinch(event))
+            .onActionEnd(() => this.finishPinch())
+            .onActionCancel(() => this.cancelPinch())
         );
     } else {
       Stack() {

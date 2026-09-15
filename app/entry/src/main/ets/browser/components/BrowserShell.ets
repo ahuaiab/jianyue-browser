@@ -60,7 +60,9 @@ import {
   copyBrowserSettings,
   DEFAULT_BROWSER_SETTINGS,
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
+  DEFAULT_START_PAGE_BACKGROUND_SCALE,
   normalizeStartPageBackgroundPosition,
+  normalizeStartPageBackgroundScale,
   StartPageBackgroundPosition,
   StartPageAppearance
 } from '../model/BrowserSettings';
@@ -93,7 +95,10 @@ import {
   tabOverviewAddressLayerZIndex,
   tabOverviewBottomChromeZIndex,
 } from '../model/TabOverviewActions';
-import { topContentInsetFromAvoidRects } from '../model/WindowAvoidance';
+import {
+  availableContentHeight,
+  topContentInsetFromAvoidRects
+} from '../model/WindowAvoidance';
 import {
   BROWSER_MODAL_Z_INDEX,
   BROWSER_OVERVIEW_ANIMATION_DURATION_MS,
@@ -704,6 +709,7 @@ export struct BrowserShell {
       x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
       y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
     },
+    startPageBackgroundScale: DEFAULT_START_PAGE_BACKGROUND_SCALE,
     startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
     defaultFontSize: 'standard'
   };
@@ -725,6 +731,7 @@ export struct BrowserShell {
     x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
     y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
   };
+  @Local pendingStartPageBackgroundScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
   @Local downloadTasks: DownloadTaskRecord[] = [];
   @Local showDownloadManager: boolean = false;
   @Local startPageCustomizeDismissProgress: number = 0;
@@ -2877,6 +2884,7 @@ export struct BrowserShell {
         x: this.browserSettings.startPageBackgroundPosition.x,
         y: this.browserSettings.startPageBackgroundPosition.y
       },
+      startPageBackgroundScale: this.browserSettings.startPageBackgroundScale,
       startPageAppearance: this.browserSettings.startPageAppearance,
       defaultFontSize: size
     };
@@ -3235,13 +3243,15 @@ export struct BrowserShell {
 
   private openStartPageBackgroundAdjust(
     source: string,
-    position: StartPageBackgroundPosition
+    position: StartPageBackgroundPosition,
+    scale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE
   ): void {
     if (source.trim().length === 0 || source.trim() === 'system-gradient') {
       return;
     }
     this.pendingStartPageBackgroundId = source;
     this.pendingStartPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
+    this.pendingStartPageBackgroundScale = normalizeStartPageBackgroundScale(scale);
     this.showStartPageBackgroundAdjust = true;
   }
 
@@ -3252,9 +3262,13 @@ export struct BrowserShell {
       x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
       y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
     };
+    this.pendingStartPageBackgroundScale = DEFAULT_START_PAGE_BACKGROUND_SCALE;
   }
 
-  private completeStartPageBackgroundAdjust(position: StartPageBackgroundPosition): void {
+  private completeStartPageBackgroundAdjust(
+    position: StartPageBackgroundPosition,
+    scale: number
+  ): void {
     if (this.pendingStartPageBackgroundId.trim().length === 0) {
       this.cancelStartPageBackgroundAdjust();
       return;
@@ -3262,8 +3276,9 @@ export struct BrowserShell {
     const next: BrowserSettings = copyBrowserSettings(this.browserSettings);
     next.startPageBackgroundId = this.pendingStartPageBackgroundId;
     next.startPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
+    next.startPageBackgroundScale = normalizeStartPageBackgroundScale(scale);
     this.updateStartPageSettings(next);
-    hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG, 'start_page_background_position_saved');
+    hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG, 'start_page_background_adjustment_saved');
     this.cancelStartPageBackgroundAdjust();
   }
 
@@ -3272,7 +3287,8 @@ export struct BrowserShell {
     const backgroundChanged: boolean = nextSettings.startPageBackgroundId !==
       this.browserSettings.startPageBackgroundId ||
       nextSettings.startPageBackgroundPosition.x !== this.browserSettings.startPageBackgroundPosition.x ||
-      nextSettings.startPageBackgroundPosition.y !== this.browserSettings.startPageBackgroundPosition.y;
+      nextSettings.startPageBackgroundPosition.y !== this.browserSettings.startPageBackgroundPosition.y ||
+      nextSettings.startPageBackgroundScale !== this.browserSettings.startPageBackgroundScale;
     this.browserSettings = nextSettings;
     if (backgroundChanged) {
       this.invalidateStartPageThumbnails();
@@ -3295,7 +3311,7 @@ export struct BrowserShell {
   }
 
   private startPageBackgroundKey(): string {
-    return `${this.browserSettings.startPageBackgroundId}|${this.browserSettings.startPageBackgroundPosition.x}|${this.browserSettings.startPageBackgroundPosition.y}`;
+    return `${this.browserSettings.startPageBackgroundId}|${this.browserSettings.startPageBackgroundPosition.x}|${this.browserSettings.startPageBackgroundPosition.y}|${this.browserSettings.startPageBackgroundScale}`;
   }
 
   private adjustCurrentStartPageBackground(): void {
@@ -3304,7 +3320,11 @@ export struct BrowserShell {
       void this.chooseStartPageBackground();
       return;
     }
-    this.openStartPageBackgroundAdjust(source, this.browserSettings.startPageBackgroundPosition);
+    this.openStartPageBackgroundAdjust(
+      source,
+      this.browserSettings.startPageBackgroundPosition,
+      this.browserSettings.startPageBackgroundScale
+    );
   }
 
   private async chooseStartPageBackground(): Promise<void> {
@@ -5339,13 +5359,20 @@ export struct BrowserShell {
           StartPageBackgroundAdjustSheet({
             source: this.pendingStartPageBackgroundId,
             backgroundPosition: this.pendingStartPageBackgroundPosition,
+            backgroundScale: this.pendingStartPageBackgroundScale,
+            pageViewportWidth: this.viewportWidth,
+            pageViewportHeight: availableContentHeight(this.viewportHeight, this.topAvoidInset),
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
             onPositionChange: (position: StartPageBackgroundPosition) => {
               this.pendingStartPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
             },
+            onScaleChange: (scale: number) => {
+              this.pendingStartPageBackgroundScale = normalizeStartPageBackgroundScale(scale);
+            },
             onCancel: () => this.cancelStartPageBackgroundAdjust(),
-            onComplete: (position: StartPageBackgroundPosition) => this.completeStartPageBackgroundAdjust(position),
+            onComplete: (position: StartPageBackgroundPosition, scale: number) =>
+              this.completeStartPageBackgroundAdjust(position, scale),
             onSelectAnother: () => { void this.chooseStartPageBackground(); }
           })
             .align(Alignment.Bottom)
