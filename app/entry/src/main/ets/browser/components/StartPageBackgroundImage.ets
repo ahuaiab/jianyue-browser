@@ -54,6 +54,20 @@ export struct StartPageBackgroundImage {
     return Math.max(0, this.imageHeight * this.coverScale() - this.componentHeight);
   }
 
+  private horizontalMatrixOverflow(): number {
+    if (!this.hasImageMetrics()) {
+      return 0;
+    }
+    return Math.max(0, this.imageWidth - this.componentWidth / this.coverScale());
+  }
+
+  private verticalMatrixOverflow(): number {
+    if (!this.hasImageMetrics()) {
+      return 0;
+    }
+    return Math.max(0, this.imageHeight - this.componentHeight / this.coverScale());
+  }
+
   private clamped(value: number): number {
     return Math.max(0, Math.min(1, value));
   }
@@ -64,8 +78,11 @@ export struct StartPageBackgroundImage {
 
   private imageTransform() {
     const position: StartPageBackgroundPosition = this.normalizedPosition();
-    const translationX: number = -this.horizontalOverflow() * position.x;
-    const translationY: number = -this.verticalOverflow() * position.y;
+    // imageMatrix transforms the source image before the matrix scale is
+    // applied, so translations must use source-image pixels rather than the
+    // already scaled overflow in the component.
+    const translationX: number = -this.horizontalMatrixOverflow() * position.x;
+    const translationY: number = -this.verticalMatrixOverflow() * position.y;
     return matrix4.identity()
       .translate({ x: translationX, y: translationY })
       .scale({ x: this.coverScale(), y: this.coverScale() });
