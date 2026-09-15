@@ -11,6 +11,33 @@ export interface CustomSearchEngine {
   urlTemplate: string;
 }
 
+export interface StartPageBackgroundPosition {
+  /** 0 is left/top and 1 is right/bottom within the cover crop. */
+  x: number;
+  y: number;
+}
+
+export const DEFAULT_START_PAGE_BACKGROUND_POSITION: StartPageBackgroundPosition = {
+  x: 0.5,
+  y: 0.5
+};
+
+export function normalizeStartPageBackgroundPosition(value: Object | undefined): StartPageBackgroundPosition {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return {
+      x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
+      y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
+    };
+  }
+  const candidate: Partial<StartPageBackgroundPosition> = value as Partial<StartPageBackgroundPosition>;
+  const x: number = typeof candidate.x === 'number' && Number.isFinite(candidate.x) ? candidate.x : 0.5;
+  const y: number = typeof candidate.y === 'number' && Number.isFinite(candidate.y) ? candidate.y : 0.5;
+  return {
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y))
+  };
+}
+
 export enum AutoCloseTabsPolicy {
   NEVER = 'never',
   AFTER_ONE_DAY = 'after_one_day',
@@ -34,6 +61,7 @@ export interface BrowserSettings {
   /** True after the user has explicitly visited/changed the start-page switches. */
   startPageSectionsConfigured: boolean;
   startPageBackgroundId: string;
+  startPageBackgroundPosition: StartPageBackgroundPosition;
   startPageAppearance: StartPageAppearance;
   defaultFontSize: string;
 }
@@ -47,6 +75,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   showFrequentSites: false,
   startPageSectionsConfigured: false,
   startPageBackgroundId: 'system-gradient',
+  startPageBackgroundPosition: DEFAULT_START_PAGE_BACKGROUND_POSITION,
   startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
   defaultFontSize: 'standard'
 };
@@ -98,6 +127,10 @@ export function copyBrowserSettings(settings: BrowserSettings): BrowserSettings 
     showFrequentSites: settings.showFrequentSites,
     startPageSectionsConfigured: settings.startPageSectionsConfigured,
     startPageBackgroundId: settings.startPageBackgroundId,
+    startPageBackgroundPosition: {
+      x: settings.startPageBackgroundPosition.x,
+      y: settings.startPageBackgroundPosition.y
+    },
     // Appearance is no longer user-configurable; migrate old in-memory values too.
     startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
     defaultFontSize: settings.defaultFontSize
@@ -127,6 +160,9 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
   // old default so an upgrade starts with only the Edit action visible.
   const sectionsConfigured: boolean = candidate.startPageSectionsConfigured === true;
   const startPageAppearance: StartPageAppearance = StartPageAppearance.FOLLOW_SYSTEM;
+  const startPageBackgroundPosition: StartPageBackgroundPosition = normalizeStartPageBackgroundPosition(
+    candidate.startPageBackgroundPosition as Object | undefined
+  );
   return {
     searchEngine,
     customSearchEngine,
@@ -139,6 +175,7 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
       candidate.startPageBackgroundId.length > 0
       ? candidate.startPageBackgroundId
       : DEFAULT_BROWSER_SETTINGS.startPageBackgroundId,
+    startPageBackgroundPosition,
     startPageAppearance,
     defaultFontSize: typeof candidate.defaultFontSize === 'string' && candidate.defaultFontSize.length > 0
       ? candidate.defaultFontSize

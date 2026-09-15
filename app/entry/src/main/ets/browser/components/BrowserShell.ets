@@ -16,6 +16,7 @@ import { LibrarySheet } from './LibrarySheet';
 import { DownloadManagerSheet } from './DownloadManagerSheet';
 import { StartPage } from './StartPage';
 import { StartPageCustomizeSheet } from './StartPageCustomizeSheet';
+import { StartPageBackgroundAdjustSheet } from './StartPageBackgroundAdjustSheet';
 import { BrowserTransitionScene } from './BrowserTransitionScene';
 import { TabOverview } from './TabOverview';
 import {
@@ -58,6 +59,9 @@ import {
   BrowserSearchEngine,
   copyBrowserSettings,
   DEFAULT_BROWSER_SETTINGS,
+  DEFAULT_START_PAGE_BACKGROUND_POSITION,
+  normalizeStartPageBackgroundPosition,
+  StartPageBackgroundPosition,
   StartPageAppearance
 } from '../model/BrowserSettings';
 import { ClosedTabStack, closedTabFromRecord } from '../data/ClosedTabStack';
@@ -696,6 +700,10 @@ export struct BrowserShell {
     showFrequentSites: false,
     startPageSectionsConfigured: false,
     startPageBackgroundId: 'system-gradient',
+    startPageBackgroundPosition: {
+      x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
+      y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
+    },
     startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
     defaultFontSize: 'standard'
   };
@@ -711,6 +719,12 @@ export struct BrowserShell {
   @Local pageReady: boolean = false;
   @Local showLibrary: boolean = false;
   @Local showStartPageCustomize: boolean = false;
+  @Local showStartPageBackgroundAdjust: boolean = false;
+  @Local pendingStartPageBackgroundId: string = '';
+  @Local pendingStartPageBackgroundPosition: StartPageBackgroundPosition = {
+    x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
+    y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
+  };
   @Local downloadTasks: DownloadTaskRecord[] = [];
   @Local showDownloadManager: boolean = false;
   @Local startPageCustomizeDismissProgress: number = 0;
@@ -2859,6 +2873,10 @@ export struct BrowserShell {
       showFrequentSites: this.browserSettings.showFrequentSites,
       startPageSectionsConfigured: this.browserSettings.startPageSectionsConfigured,
       startPageBackgroundId: this.browserSettings.startPageBackgroundId,
+      startPageBackgroundPosition: {
+        x: this.browserSettings.startPageBackgroundPosition.x,
+        y: this.browserSettings.startPageBackgroundPosition.y
+      },
       startPageAppearance: this.browserSettings.startPageAppearance,
       defaultFontSize: size
     };
@@ -3215,10 +3233,46 @@ export struct BrowserShell {
     this.startPageCustomizeDismissRequested = false;
   }
 
+  private openStartPageBackgroundAdjust(
+    source: string,
+    position: StartPageBackgroundPosition
+  ): void {
+    if (source.trim().length === 0 || source.trim() === 'system-gradient') {
+      return;
+    }
+    this.pendingStartPageBackgroundId = source;
+    this.pendingStartPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
+    this.showStartPageBackgroundAdjust = true;
+  }
+
+  private cancelStartPageBackgroundAdjust(): void {
+    this.showStartPageBackgroundAdjust = false;
+    this.pendingStartPageBackgroundId = '';
+    this.pendingStartPageBackgroundPosition = {
+      x: DEFAULT_START_PAGE_BACKGROUND_POSITION.x,
+      y: DEFAULT_START_PAGE_BACKGROUND_POSITION.y
+    };
+  }
+
+  private completeStartPageBackgroundAdjust(position: StartPageBackgroundPosition): void {
+    if (this.pendingStartPageBackgroundId.trim().length === 0) {
+      this.cancelStartPageBackgroundAdjust();
+      return;
+    }
+    const next: BrowserSettings = copyBrowserSettings(this.browserSettings);
+    next.startPageBackgroundId = this.pendingStartPageBackgroundId;
+    next.startPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
+    this.updateStartPageSettings(next);
+    hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG, 'start_page_background_position_saved');
+    this.cancelStartPageBackgroundAdjust();
+  }
+
   private updateStartPageSettings(settings: BrowserSettings): void {
     const nextSettings: BrowserSettings = copyBrowserSettings(settings);
     const backgroundChanged: boolean = nextSettings.startPageBackgroundId !==
-      this.browserSettings.startPageBackgroundId;
+      this.browserSettings.startPageBackgroundId ||
+      nextSettings.startPageBackgroundPosition.x !== this.browserSettings.startPageBackgroundPosition.x ||
+      nextSettings.startPageBackgroundPosition.y !== this.browserSettings.startPageBackgroundPosition.y;
     this.browserSettings = nextSettings;
     if (backgroundChanged) {
       this.invalidateStartPageThumbnails();
@@ -3240,6 +3294,19 @@ export struct BrowserShell {
     }
   }
 
+  private startPageBackgroundKey(): string {
+    return `${this.browserSettings.startPageBackgroundId}|${this.browserSettings.startPageBackgroundPosition.x}|${this.browserSettings.startPageBackgroundPosition.y}`;
+  }
+
+  private adjustCurrentStartPageBackground(): void {
+    const source: string = this.browserSettings.startPageBackgroundId.trim();
+    if (source.length === 0 || source === 'system-gradient') {
+      void this.chooseStartPageBackground();
+      return;
+    }
+    this.openStartPageBackgroundAdjust(source, this.browserSettings.startPageBackgroundPosition);
+  }
+
   private async chooseStartPageBackground(): Promise<void> {
     const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
@@ -3252,9 +3319,7 @@ export struct BrowserShell {
         hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG, 'start_page_background_picker_cancelled');
         return;
       }
-      const next: BrowserSettings = copyBrowserSettings(this.browserSettings);
-      next.startPageBackgroundId = selectedUri;
-      this.updateStartPageSettings(next);
+      this.openStartPageBackgroundAdjust(selectedUri, DEFAULT_START_PAGE_BACKGROUND_POSITION);
       hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
         'start_page_background_selected uriLength=%{public}d', selectedUri.length);
     } catch (_error) {
@@ -3727,7 +3792,7 @@ export struct BrowserShell {
   private currentStartPageThumbnail(): image.PixelMap | undefined {
     if (!startPageThumbnailMatchesBackground(
       this.startPageThumbnailBackgroundId,
-      this.browserSettings.startPageBackgroundId
+      this.startPageBackgroundKey()
     )) {
       return undefined;
     }
@@ -3977,7 +4042,7 @@ export struct BrowserShell {
         this.thumbnails.set(tabId, pixel);
         if (tab.url === 'about:blank') {
           this.startPageThumbnail = pixel;
-          this.startPageThumbnailBackgroundId = this.browserSettings.startPageBackgroundId;
+          this.startPageThumbnailBackgroundId = this.startPageBackgroundKey();
         }
         this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
         this.cardRevision += 1;
@@ -3996,7 +4061,7 @@ export struct BrowserShell {
       return;
     }
     this.startPageSnapshotInFlight.add(tabId);
-    const capturedBackgroundId: string = this.browserSettings.startPageBackgroundId;
+    const capturedBackgroundId: string = this.startPageBackgroundKey();
     const startedBeforeGesture: boolean = !this.gestureActive;
     try {
       const pixel: image.PixelMap | undefined = await this.captureStartPageSnapshot();
@@ -4004,7 +4069,7 @@ export struct BrowserShell {
         this.tabStore.activeTabId !== tabId ||
         !startPageThumbnailMatchesBackground(
           capturedBackgroundId,
-          this.browserSettings.startPageBackgroundId
+          this.startPageBackgroundKey()
         )) {
         return;
       }
@@ -5240,6 +5305,7 @@ export struct BrowserShell {
             onSettingsChange: (settings: BrowserSettings) => this.updateStartPageSettings(settings),
             onItemsChange: (items: StartPageItem[]) => this.updateStartPageItems(items),
             onSelectBackground: () => { void this.chooseStartPageBackground(); },
+            onAdjustBackground: () => this.adjustCurrentStartPageBackground(),
             onClose: () => this.closeStartPageCustomize(),
             onDismissStart: () => this.beginStartPageCustomizeDismissAnimation()
           })
@@ -5266,6 +5332,34 @@ export struct BrowserShell {
                   })
               )
             )
+        }
+
+        if (this.showStartPageBackgroundAdjust && !this.showDownloadManager && this.overviewProgress === 0 &&
+          this.pendingStartPageBackgroundId.trim().length > 0) {
+          StartPageBackgroundAdjustSheet({
+            source: this.pendingStartPageBackgroundId,
+            backgroundPosition: this.pendingStartPageBackgroundPosition,
+            topInset: this.topAvoidInset,
+            bottomInset: this.bottomAvoidInset,
+            onPositionChange: (position: StartPageBackgroundPosition) => {
+              this.pendingStartPageBackgroundPosition = normalizeStartPageBackgroundPosition(position as Object);
+            },
+            onCancel: () => this.cancelStartPageBackgroundAdjust(),
+            onComplete: (position: StartPageBackgroundPosition) => this.completeStartPageBackgroundAdjust(position),
+            onSelectAnother: () => { void this.chooseStartPageBackground(); }
+          })
+            .align(Alignment.Bottom)
+            .zIndex(BROWSER_MODAL_Z_INDEX + 1)
+            .transition(
+              TransitionEffect.asymmetric(
+                TransitionEffect.move(TransitionEdge.BOTTOM)
+                  .combine(TransitionEffect.OPACITY)
+                  .animation({ curve: curves.springMotion() }),
+                TransitionEffect.move(TransitionEdge.BOTTOM)
+                  .combine(TransitionEffect.OPACITY)
+                  .animation({ curve: curves.springMotion() })
+              )
+            );
         }
 
         if (this.pageSnapshot !== undefined && this.overviewProgress === 0 &&

@@ -10,6 +10,7 @@ import {
   HARMONY_RADIUS_CONTROL,
   HARMONY_RADIUS_CARD
 } from '../model/BrowserVisualMetrics';
+import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 
 /**
  * Native blank-tab surface.  The reference starts with a quiet canvas, a
@@ -56,11 +57,13 @@ export struct StartPage {
         .height('100%')
         .backgroundColor('#FFFFFF');
     } else {
-      Image(this.selectedBackgroundSource())
+      StartPageBackgroundImage({
+        source: this.selectedBackgroundSource(),
+        backgroundPosition: this.settings.startPageBackgroundPosition
+      })
         .id('start-page-background-image')
         .width('100%')
-        .height('100%')
-        .objectFit(ImageFit.Cover);
+        .height('100%');
     }
   }
 

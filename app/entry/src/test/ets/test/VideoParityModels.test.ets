@@ -5,10 +5,12 @@ import {
   BrowserSearchEngine,
   CustomSearchEngine,
   DEFAULT_BROWSER_SETTINGS,
+  DEFAULT_START_PAGE_BACKGROUND_POSITION,
   copyBrowserSettings,
   normalizeBrowserSettings,
   availableBrowserSearchEngines,
-  normalizeCustomSearchEngine
+  normalizeCustomSearchEngine,
+  normalizeStartPageBackgroundPosition
 } from '../../../main/ets/browser/model/BrowserSettings';
 import {
   StartPageItem,
@@ -260,6 +262,24 @@ export default function videoParityModelsTest() {
       expect(startPageBackgroundSource('system-gradient')).assertUndefined();
       expect(startPageBackgroundSource('datashare:///media/Photo/001.jpg'))
         .assertEqual('datashare:///media/Photo/001.jpg');
+    });
+
+    it('normalizes and persists the start-page background position', 0, () => {
+      expect(DEFAULT_START_PAGE_BACKGROUND_POSITION.x).assertEqual(0.5);
+      expect(DEFAULT_START_PAGE_BACKGROUND_POSITION.y).assertEqual(0.5);
+      const normalized = normalizeStartPageBackgroundPosition({ x: 1.8, y: -0.4 } as Object);
+      expect(normalized.x).assertEqual(1);
+      expect(normalized.y).assertEqual(0);
+
+      const settings: BrowserSettings = normalizeBrowserSettings({
+        startPageBackgroundId: 'datashare:///media/Photo/001.jpg',
+        startPageBackgroundPosition: { x: 0.2, y: 0.8 }
+      } as Object);
+      expect(settings.startPageBackgroundPosition.x).assertEqual(0.2);
+      expect(settings.startPageBackgroundPosition.y).assertEqual(0.8);
+      const copied: BrowserSettings = copyBrowserSettings(settings);
+      expect(copied.startPageBackgroundPosition.x).assertEqual(0.2);
+      expect(copied.startPageBackgroundPosition.y).assertEqual(0.8);
     });
 
     it('does not reuse a start-page frame after the background changes', 0, () => {

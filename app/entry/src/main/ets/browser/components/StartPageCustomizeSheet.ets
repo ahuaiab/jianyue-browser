@@ -40,6 +40,7 @@ export struct StartPageCustomizeSheet {
   @Param onItemsChange: (items: StartPageItem[]) => void =
     (_items: StartPageItem[]) => undefined;
   @Param onSelectBackground: () => void = () => undefined;
+  @Param onAdjustBackground: () => void = () => undefined;
   @Param onClose: () => void = () => undefined;
   @Param onDismissStart: () => void = () => undefined;
 
@@ -90,7 +91,15 @@ export struct StartPageCustomizeSheet {
   private startPageBackgroundLabel(): string {
     return this.settings.startPageBackgroundId.trim() === 'system-gradient'
       ? '系统默认'
-      : '选择图片';
+      : '调整位置';
+  }
+
+  private selectBackgroundAction(): void {
+    if (this.settings.startPageBackgroundId.trim() === 'system-gradient') {
+      this.onSelectBackground();
+      return;
+    }
+    this.onAdjustBackground();
   }
 
   private engineOptions(): BrowserSearchEngine[] {
@@ -601,7 +610,7 @@ export struct StartPageCustomizeSheet {
       .width('100%')
       .height(56)
       .padding({ left: 16, right: 16 })
-      .onClick(() => this.onSelectBackground());
+      .onClick(() => this.selectBackgroundAction());
   }
 
   @Builder
