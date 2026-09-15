@@ -3,9 +3,12 @@ import { Context } from '@kit.AbilityKit';
 import {
   BrowserSettings,
   BrowserSearchEngine,
+  CustomSearchEngine,
   DEFAULT_BROWSER_SETTINGS,
   copyBrowserSettings,
-  normalizeBrowserSettings
+  normalizeBrowserSettings,
+  availableBrowserSearchEngines,
+  normalizeCustomSearchEngine
 } from '../../../main/ets/browser/model/BrowserSettings';
 import {
   StartPageItem,
@@ -272,10 +275,44 @@ export default function videoParityModelsTest() {
       expect(searchEngineLabel(BrowserSearchEngine.BAIDU)).assertEqual('百度');
       expect(searchUrlForEngine(BrowserSearchEngine.BAIDU, '鸿蒙 浏览器'))
         .assertEqual('https://www.baidu.com/s?wd=%E9%B8%BF%E8%92%99%20%E6%B5%8F%E8%A7%88%E5%99%A8');
-      expect(normalizeAddressInput('open source', BrowserSearchEngine.DUCKDUCKGO))
-        .assertEqual('https://duckduckgo.com/?q=open%20source');
-      expect(normalizeAddressInput('developer.huawei.com', BrowserSearchEngine.YAHOO))
+      expect(normalizeAddressInput('open source', BrowserSearchEngine.BING))
+        .assertEqual('https://cn.bing.com/search?q=open%20source');
+      expect(normalizeAddressInput('developer.huawei.com', BrowserSearchEngine.BAIDU))
         .assertEqual('https://developer.huawei.com');
+    });
+
+    it('keeps only Bing and Baidu built-ins and supports a custom search engine', 0, () => {
+      const builtIns: BrowserSearchEngine[] = availableBrowserSearchEngines();
+      expect(builtIns.length).assertEqual(2);
+      expect(builtIns[0]).assertEqual(BrowserSearchEngine.BING);
+      expect(builtIns[1]).assertEqual(BrowserSearchEngine.BAIDU);
+
+      const custom: CustomSearchEngine | undefined = normalizeCustomSearchEngine({
+        name: '自定义搜索',
+        urlTemplate: 'https://search.example/?q=%s'
+      } as Object);
+      expect(custom === undefined).assertFalse();
+      if (custom !== undefined) {
+        const engines: BrowserSearchEngine[] = availableBrowserSearchEngines(custom);
+        expect(engines.length).assertEqual(3);
+        expect(engines[2]).assertEqual(BrowserSearchEngine.CUSTOM);
+        expect(searchEngineLabel(BrowserSearchEngine.CUSTOM, custom)).assertEqual('自定义搜索');
+        expect(searchUrlForEngine(BrowserSearchEngine.CUSTOM, '鸿蒙 浏览器', custom))
+          .assertEqual('https://search.example/?q=%E9%B8%BF%E8%92%99%20%E6%B5%8F%E8%A7%88%E5%99%A8');
+        const customSettings: BrowserSettings = normalizeBrowserSettings({
+          searchEngine: BrowserSearchEngine.CUSTOM,
+          customSearchEngine: custom
+        } as Object);
+        expect(customSettings.searchEngine).assertEqual(BrowserSearchEngine.CUSTOM);
+        expect(customSettings.customSearchEngine?.urlTemplate).assertEqual(custom.urlTemplate);
+      }
+
+      const migrated: BrowserSettings = normalizeBrowserSettings({ searchEngine: 'google' } as Object);
+      expect(migrated.searchEngine).assertEqual(BrowserSearchEngine.BING);
+      expect(searchUrlForEngine('google' as BrowserSearchEngine, 'legacy'))
+        .assertEqual('https://cn.bing.com/search?q=legacy');
+      expect(normalizeCustomSearchEngine({ name: '无效', urlTemplate: 'https://example.com/search' } as Object))
+        .assertUndefined();
     });
 
     it('copies settings without sharing mutable state', 0, () => {

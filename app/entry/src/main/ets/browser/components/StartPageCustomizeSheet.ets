@@ -2,9 +2,12 @@ import { uiMaterial } from '@kit.ArkUI';
 import { curves } from '@kit.ArkUI';
 import {
   BrowserSearchEngine,
+  CustomSearchEngine,
   BrowserSettings,
   copyBrowserSettings,
-  DEFAULT_BROWSER_SETTINGS
+  DEFAULT_BROWSER_SETTINGS,
+  availableBrowserSearchEngines,
+  normalizeCustomSearchEngine
 } from '../model/BrowserSettings';
 import { searchEngineLabel } from '../model/BrowserTypes';
 import {
@@ -41,6 +44,10 @@ export struct StartPageCustomizeSheet {
   @Param onDismissStart: () => void = () => undefined;
 
   @Local engineExpanded: boolean = false;
+  @Local customEngineEditorVisible: boolean = false;
+  @Local customEngineNameDraft: string = '';
+  @Local customEngineUrlDraft: string = '';
+  @Local customEngineError: string = '';
   @Local swipeItemId: string = '';
   @Local swipeOffsetY: number = 0;
   private swipeFinished: boolean = false;
@@ -87,14 +94,61 @@ export struct StartPageCustomizeSheet {
   }
 
   private engineOptions(): BrowserSearchEngine[] {
-    return [
-      BrowserSearchEngine.YAHOO,
-      BrowserSearchEngine.BING,
-      BrowserSearchEngine.BAIDU,
-      BrowserSearchEngine.GOOGLE,
-      BrowserSearchEngine.DUCKDUCKGO,
-      BrowserSearchEngine.SOGOU
-    ];
+    return availableBrowserSearchEngines(this.settings.customSearchEngine);
+  }
+
+  private selectedSearchEngineLabel(): string {
+    return searchEngineLabel(this.settings.searchEngine, this.settings.customSearchEngine);
+  }
+
+  private openCustomEngineEditor(): void {
+    const custom: CustomSearchEngine | undefined = this.settings.customSearchEngine;
+    this.customEngineNameDraft = custom?.name ?? '';
+    this.customEngineUrlDraft = custom?.urlTemplate ?? '';
+    this.customEngineError = '';
+    this.engineExpanded = false;
+    this.customEngineEditorVisible = true;
+  }
+
+  private closeCustomEngineEditor(): void {
+    this.customEngineError = '';
+    this.customEngineEditorVisible = false;
+  }
+
+  private saveCustomEngine(): void {
+    const draft: CustomSearchEngine = {
+      name: this.customEngineNameDraft,
+      urlTemplate: this.customEngineUrlDraft
+    };
+    const custom: CustomSearchEngine | undefined = normalizeCustomSearchEngine(draft as Object);
+    if (custom === undefined) {
+      this.customEngineError = '请输入名称，并使用包含 %s 的 HTTP(S) 搜索地址';
+      return;
+    }
+    const next: BrowserSettings = this.settingWith(
+      this.settings.showFavorites,
+      this.settings.showFrequentSites,
+      BrowserSearchEngine.CUSTOM
+    );
+    next.customSearchEngine = custom;
+    this.updateSettings(next);
+    this.customEngineError = '';
+    this.customEngineEditorVisible = false;
+  }
+
+  private removeCustomEngine(): void {
+    const nextEngine: BrowserSearchEngine = this.settings.searchEngine === BrowserSearchEngine.CUSTOM
+      ? BrowserSearchEngine.BING
+      : this.settings.searchEngine;
+    const next: BrowserSettings = this.settingWith(
+      this.settings.showFavorites,
+      this.settings.showFrequentSites,
+      nextEngine
+    );
+    next.customSearchEngine = undefined;
+    this.updateSettings(next);
+    this.customEngineError = '';
+    this.customEngineEditorVisible = false;
   }
 
   private editableItems(): StartPageItem[] {
@@ -319,7 +373,7 @@ export struct StartPageCustomizeSheet {
           .fontSize(16)
           .fontColor('#1D1D1F')
           .layoutWeight(1);
-        Button(searchEngineLabel(this.settings.searchEngine), { type: ButtonType.Normal, stateEffect: false })
+        Button(this.selectedSearchEngineLabel(), { type: ButtonType.Normal, stateEffect: false })
           .id('start-page-search-engine-value')
           .fontSize(14)
           .fontColor('#007AFF')
@@ -341,7 +395,7 @@ export struct StartPageCustomizeSheet {
           ForEach(this.engineOptions(), (engine: BrowserSearchEngine) => {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Row() {
-                Text(searchEngineLabel(engine))
+                Text(searchEngineLabel(engine, this.settings.customSearchEngine))
                   .fontSize(15)
                   .fontColor('#1D1D1F')
                   .layoutWeight(1);
@@ -372,6 +426,26 @@ export struct StartPageCustomizeSheet {
         }
           .width('100%')
           .backgroundColor('#F8F8FA');
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Row() {
+            Text('编辑')
+              .fontSize(15)
+              .fontColor('#007AFF')
+              .layoutWeight(1);
+            SymbolGlyph($r('sys.symbol.pencil_line'))
+              .fontSize(18)
+              .fontColor(['#007AFF']);
+          }
+            .width('100%')
+            .height(44);
+        }
+          .id('start-page-search-engine-edit')
+          .width('100%')
+          .height(44)
+          .padding({ left: 52, right: 16 })
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .onClick(() => this.openCustomEngineEditor());
       }
     }
       .id('start-page-search-engine-section')
@@ -380,6 +454,130 @@ export struct StartPageCustomizeSheet {
       // expanded options get a slightly lighter inset to preserve hierarchy.
       .backgroundColor('#F2F2F7')
       .border({ width: { bottom: 1 }, color: '#E5E5EA' });
+  }
+
+  @Builder
+  private customEngineEditor() {
+    Column() {
+      Blank()
+        .width('100%')
+        .height(this.safeTopInset());
+      Row() {
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          SymbolGlyph($r('sys.symbol.xmark'))
+            .fontSize(18)
+            .fontColor(['#6B6B72']);
+        }
+          .id('custom-search-engine-cancel')
+          .width(44)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .onClick(() => this.closeCustomEngineEditor());
+        Text('编辑搜索引擎')
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1D1D1F')
+          .layoutWeight(1)
+          .textAlign(TextAlign.Center);
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text('保存')
+            .fontSize(15)
+            .fontColor('#007AFF');
+        }
+          .id('custom-search-engine-save')
+          .width(56)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .onClick(() => this.saveCustomEngine());
+      }
+        .id('custom-search-engine-header')
+        .width('100%')
+        .height(48)
+        .padding({ left: 8, right: 8 });
+
+      Scroll() {
+        Column({ space: 12 }) {
+          Text('自定义搜索引擎')
+            .fontSize(13)
+            .fontColor('#6B6B72')
+            .width('100%');
+          TextInput({
+            text: this.customEngineNameDraft,
+            placeholder: '名称'
+          })
+            .id('custom-search-engine-name-input')
+            .width('100%')
+            .height(52)
+            .padding({ left: 16, right: 16 })
+            .fontSize(16)
+            .fontColor('#1D1D1F')
+            .placeholderColor('#8E8E93')
+            .backgroundColor('#F2F2F7')
+            .borderRadius(HARMONY_RADIUS_CARD)
+            .onChange((value: string) => this.customEngineNameDraft = value);
+          Text('搜索 URL 模板')
+            .fontSize(13)
+            .fontColor('#6B6B72')
+            .width('100%');
+          TextInput({
+            text: this.customEngineUrlDraft,
+            placeholder: 'https://example.com/search?q=%s'
+          })
+            .id('custom-search-engine-url-input')
+            .width('100%')
+            .height(52)
+            .padding({ left: 16, right: 16 })
+            .fontSize(14)
+            .fontColor('#1D1D1F')
+            .placeholderColor('#8E8E93')
+            .backgroundColor('#F2F2F7')
+            .borderRadius(HARMONY_RADIUS_CARD)
+            .onChange((value: string) => this.customEngineUrlDraft = value);
+          Text('使用 %s 代表搜索关键词，地址必须以 HTTP 或 HTTPS 开头。')
+            .fontSize(12)
+            .fontColor('#8E8E93')
+            .width('100%');
+          if (this.customEngineError.length > 0) {
+            Text(this.customEngineError)
+              .id('custom-search-engine-error')
+              .fontSize(12)
+              .fontColor('#FF3B30')
+              .width('100%');
+          }
+          if (this.settings.customSearchEngine !== undefined) {
+            Button({ type: ButtonType.Normal, stateEffect: false }) {
+              Text('删除自定义搜索引擎')
+                .fontSize(15)
+                .fontColor('#FF3B30');
+            }
+              .id('custom-search-engine-delete')
+              .width('100%')
+              .height(48)
+              .backgroundColor('#F2F2F7')
+              .borderRadius(HARMONY_RADIUS_CARD)
+              .stateEffect(false)
+              .onClick(() => this.removeCustomEngine());
+          }
+        }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 12, bottom: 24 });
+      }
+        .id('custom-search-engine-scroll')
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Off);
+
+      Blank()
+        .width('100%')
+        .height(Math.max(0, this.bottomInset));
+    }
+      .id('custom-search-engine-editor')
+      .width('100%')
+      .height('100%');
   }
 
   @Builder
@@ -496,7 +694,7 @@ export struct StartPageCustomizeSheet {
   }
 
   build() {
-    Column() {
+      Column() {
       // Measure the sheet against the full window and anchor it at the
       // bottom. A direct height on the component itself can otherwise be
       // aligned to the remaining content area above the browser chrome.
@@ -505,7 +703,10 @@ export struct StartPageCustomizeSheet {
         .layoutWeight(1);
 
       Column() {
-      Blank()
+        if (this.customEngineEditorVisible) {
+          this.customEngineEditor();
+        } else {
+          Blank()
         .width('100%')
         .height(this.safeTopInset());
         Row() {
@@ -567,6 +768,7 @@ export struct StartPageCustomizeSheet {
       Blank()
         .width('100%')
         .height(Math.max(0, this.bottomInset));
+        }
       }
         .id('start-page-customize-sheet')
         .width('100%')

@@ -1,11 +1,14 @@
 /** User-facing browser settings mirrored from the video, kept independent of ArkWeb. */
 export enum BrowserSearchEngine {
-  YAHOO = 'yahoo',
   BING = 'bing',
   BAIDU = 'baidu',
-  GOOGLE = 'google',
-  DUCKDUCKGO = 'duckduckgo',
-  SOGOU = 'sogou'
+  CUSTOM = 'custom'
+}
+
+export interface CustomSearchEngine {
+  name: string;
+  /** HTTP(S) URL with one or more `%s` placeholders for an encoded query. */
+  urlTemplate: string;
 }
 
 export enum AutoCloseTabsPolicy {
@@ -23,6 +26,7 @@ export enum StartPageAppearance {
 
 export interface BrowserSettings {
   searchEngine: BrowserSearchEngine;
+  customSearchEngine?: CustomSearchEngine;
   autoCloseTabs: AutoCloseTabsPolicy;
   contentBlockingEnabled: boolean;
   showFavorites: boolean;
@@ -36,6 +40,7 @@ export interface BrowserSettings {
 
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   searchEngine: BrowserSearchEngine.BING,
+  customSearchEngine: undefined,
   autoCloseTabs: AutoCloseTabsPolicy.NEVER,
   contentBlockingEnabled: false,
   showFavorites: false,
@@ -46,9 +51,47 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   defaultFontSize: 'standard'
 };
 
+/** Normalize a user-defined search engine before it is persisted or used. */
+export function normalizeCustomSearchEngine(value: Object | undefined): CustomSearchEngine | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return undefined;
+  }
+  const candidate: Partial<CustomSearchEngine> = value as Partial<CustomSearchEngine>;
+  const name: string = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+  const urlTemplate: string = typeof candidate.urlTemplate === 'string'
+    ? candidate.urlTemplate.trim()
+    : '';
+  const lowerTemplate: string = urlTemplate.toLowerCase();
+  const schemeValid: boolean = lowerTemplate.startsWith('https://') || lowerTemplate.startsWith('http://');
+  const schemeEnd: number = urlTemplate.indexOf('://');
+  const hostStart: number = schemeEnd < 0 ? urlTemplate.length : schemeEnd + 3;
+  const host: string = urlTemplate.slice(hostStart).split('/')[0].split('?')[0].split('#')[0];
+  if (name.length === 0 || name.length > 32 || urlTemplate.length === 0 || urlTemplate.length > 512 ||
+    !schemeValid || host.length === 0 || urlTemplate.includes('%s') === false ||
+    urlTemplate.includes(' ') || urlTemplate.includes('\n') || urlTemplate.includes('\r')) {
+    return undefined;
+  }
+  return { name, urlTemplate };
+}
+
+/** Search engines exposed by the settings UI; custom is shown after it is saved. */
+export function availableBrowserSearchEngines(custom?: CustomSearchEngine): BrowserSearchEngine[] {
+  const engines: BrowserSearchEngine[] = [BrowserSearchEngine.BING, BrowserSearchEngine.BAIDU];
+  if (custom !== undefined) {
+    engines.push(BrowserSearchEngine.CUSTOM);
+  }
+  return engines;
+}
+
 export function copyBrowserSettings(settings: BrowserSettings): BrowserSettings {
   return {
     searchEngine: settings.searchEngine,
+    customSearchEngine: settings.customSearchEngine === undefined
+      ? undefined
+      : {
+        name: settings.customSearchEngine.name,
+        urlTemplate: settings.customSearchEngine.urlTemplate
+      },
     autoCloseTabs: settings.autoCloseTabs,
     contentBlockingEnabled: settings.contentBlockingEnabled,
     showFavorites: settings.showFavorites,
@@ -66,13 +109,14 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
     return copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
   }
   const candidate: Partial<BrowserSettings> = value as Partial<BrowserSettings>;
-  const searchEngine: BrowserSearchEngine = candidate.searchEngine === BrowserSearchEngine.YAHOO ||
-    candidate.searchEngine === BrowserSearchEngine.BAIDU ||
-    candidate.searchEngine === BrowserSearchEngine.GOOGLE ||
-    candidate.searchEngine === BrowserSearchEngine.DUCKDUCKGO ||
-    candidate.searchEngine === BrowserSearchEngine.SOGOU
-    ? candidate.searchEngine
-    : BrowserSearchEngine.BING;
+  const customSearchEngine: CustomSearchEngine | undefined = normalizeCustomSearchEngine(
+    candidate.customSearchEngine as Object | undefined
+  );
+  const searchEngine: BrowserSearchEngine = candidate.searchEngine === BrowserSearchEngine.BAIDU
+    ? BrowserSearchEngine.BAIDU
+    : candidate.searchEngine === BrowserSearchEngine.CUSTOM && customSearchEngine !== undefined
+      ? BrowserSearchEngine.CUSTOM
+      : BrowserSearchEngine.BING;
   const autoCloseTabs: AutoCloseTabsPolicy = candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_DAY ||
     candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_WEEK ||
     candidate.autoCloseTabs === AutoCloseTabsPolicy.AFTER_ONE_MONTH
@@ -85,6 +129,7 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
   const startPageAppearance: StartPageAppearance = StartPageAppearance.FOLLOW_SYSTEM;
   return {
     searchEngine,
+    customSearchEngine,
     autoCloseTabs,
     contentBlockingEnabled: candidate.contentBlockingEnabled === true,
     showFavorites: sectionsConfigured && candidate.showFavorites === true,

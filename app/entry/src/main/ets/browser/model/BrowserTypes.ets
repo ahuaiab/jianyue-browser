@@ -1,4 +1,4 @@
-import { BrowserSearchEngine } from './BrowserSettings';
+import { BrowserSearchEngine, CustomSearchEngine } from './BrowserSettings';
 
 export type TabId = string;
 export type AddressBarSource = 'search' | 'url';
@@ -126,41 +126,27 @@ export interface GestureDecision {
   outcome: GestureOutcome;
 }
 
-export function searchEngineLabel(engine: BrowserSearchEngine): string {
-  if (engine === BrowserSearchEngine.YAHOO) {
-    return '雅虎';
-  }
+export function searchEngineLabel(engine: BrowserSearchEngine, custom?: CustomSearchEngine): string {
   if (engine === BrowserSearchEngine.BAIDU) {
     return '百度';
   }
-  if (engine === BrowserSearchEngine.GOOGLE) {
-    return '谷歌';
-  }
-  if (engine === BrowserSearchEngine.DUCKDUCKGO) {
-    return 'DuckDuckGo';
-  }
-  if (engine === BrowserSearchEngine.SOGOU) {
-    return '搜狗';
+  if (engine === BrowserSearchEngine.CUSTOM && custom !== undefined) {
+    return custom.name;
   }
   return '必应';
 }
 
-export function searchUrlForEngine(engine: BrowserSearchEngine, query: string): string {
+export function searchUrlForEngine(
+  engine: BrowserSearchEngine,
+  query: string,
+  custom?: CustomSearchEngine
+): string {
   const encoded: string = encodeURIComponent(query);
-  if (engine === BrowserSearchEngine.YAHOO) {
-    return `https://search.yahoo.com/search?p=${encoded}`;
-  }
   if (engine === BrowserSearchEngine.BAIDU) {
     return `https://www.baidu.com/s?wd=${encoded}`;
   }
-  if (engine === BrowserSearchEngine.GOOGLE) {
-    return `https://www.google.com/search?q=${encoded}`;
-  }
-  if (engine === BrowserSearchEngine.DUCKDUCKGO) {
-    return `https://duckduckgo.com/?q=${encoded}`;
-  }
-  if (engine === BrowserSearchEngine.SOGOU) {
-    return `https://www.sogou.com/web?query=${encoded}`;
+  if (engine === BrowserSearchEngine.CUSTOM && custom !== undefined && custom.urlTemplate.includes('%s')) {
+    return custom.urlTemplate.split('%s').join(encoded);
   }
   return `https://cn.bing.com/search?q=${encoded}`;
 }
@@ -183,20 +169,8 @@ function searchResultDescriptorFor(url: string): SearchResultDescriptor | undefi
     (path.startsWith('/search?') || path.startsWith('/?'))) {
     return { engine: BrowserSearchEngine.BING, queryParameter: 'q' };
   }
-  if (host === 'search.yahoo.com' && path.startsWith('/search?')) {
-    return { engine: BrowserSearchEngine.YAHOO, queryParameter: 'p' };
-  }
   if ((host === 'www.baidu.com' || host === 'baidu.com') && path.startsWith('/s?')) {
     return { engine: BrowserSearchEngine.BAIDU, queryParameter: 'wd' };
-  }
-  if ((host === 'www.google.com' || host === 'google.com') && path.startsWith('/search?')) {
-    return { engine: BrowserSearchEngine.GOOGLE, queryParameter: 'q' };
-  }
-  if ((host === 'duckduckgo.com' || host === 'www.duckduckgo.com') && path.startsWith('/?')) {
-    return { engine: BrowserSearchEngine.DUCKDUCKGO, queryParameter: 'q' };
-  }
-  if ((host === 'www.sogou.com' || host === 'sogou.com') && path.startsWith('/web?')) {
-    return { engine: BrowserSearchEngine.SOGOU, queryParameter: 'query' };
   }
   return undefined;
 }
@@ -436,7 +410,11 @@ export function committedUrlForTabState(reportedUrl: string, fallbackUrl: string
   return fallback ?? 'about:blank';
 }
 
-export function normalizeAddressInput(input: string, engine: BrowserSearchEngine = BrowserSearchEngine.BING): string {
+export function normalizeAddressInput(
+  input: string,
+  engine: BrowserSearchEngine = BrowserSearchEngine.BING,
+  custom?: CustomSearchEngine
+): string {
   const value: string = input.trim();
   const explicitUrl: string | undefined = loadableUrlFor(value);
   if (explicitUrl !== undefined) {
@@ -448,5 +426,5 @@ export function normalizeAddressInput(input: string, engine: BrowserSearchEngine
       return hostnameUrl;
     }
   }
-  return searchUrlForEngine(engine, value);
+  return searchUrlForEngine(engine, value, custom);
 }

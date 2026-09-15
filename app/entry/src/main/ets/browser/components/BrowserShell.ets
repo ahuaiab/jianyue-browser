@@ -2519,7 +2519,8 @@ export struct BrowserShell {
       : '';
     const url: string = normalizeAddressInput(
       submittedMode === AddressBarPresentationMode.SEARCH ? submittedQuery : value,
-      this.browserSettings.searchEngine
+      this.browserSettings.searchEngine,
+      this.browserSettings.customSearchEngine
     );
     const activeId: TabId = this.tabStore.activeTabId;
     const currentUrl: string = this.urlForTab(activeId);

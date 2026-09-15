@@ -23,7 +23,7 @@ const PREVIEW_SETTINGS: BrowserSettings = copyBrowserSettings(DEFAULT_BROWSER_SE
 const PREVIEW_TABS: BrowserTabRecord[] = [
   {
     id: 'preview-tab-1',
-    title: '如何花掉十个亿 - Google 搜索',
+    title: '如何花掉十个亿 - 必应搜索',
     url: 'https://zhihu.com/question/preview-1',
     isPrivate: false,
     createdAt: 1,
@@ -33,7 +33,7 @@ const PREVIEW_TABS: BrowserTabRecord[] = [
   },
   {
     id: 'preview-tab-2',
-    title: '长得太帅如何与人相处 - Google 搜索',
+    title: '长得太帅如何与人相处 - 必应搜索',
     url: 'https://zhihu.com/question/preview-2',
     isPrivate: false,
     createdAt: 2,
@@ -43,7 +43,7 @@ const PREVIEW_TABS: BrowserTabRecord[] = [
   },
   {
     id: 'preview-tab-3',
-    title: '异性缘太好怎么办 - Google 搜索',
+    title: '异性缘太好怎么办 - 必应搜索',
     url: 'https://zhihu.com/question/preview-3',
     isPrivate: false,
     createdAt: 3,
@@ -53,7 +53,7 @@ const PREVIEW_TABS: BrowserTabRecord[] = [
   },
   {
     id: 'preview-tab-4',
-    title: '爱幻想是一种病吗 - Google 搜索',
+    title: '爱幻想是一种病吗 - 必应搜索',
     url: 'https://www.toutiao.com/search/preview-4',
     isPrivate: false,
     createdAt: 4,
