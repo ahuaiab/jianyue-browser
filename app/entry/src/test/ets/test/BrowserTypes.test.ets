@@ -9,6 +9,7 @@ import {
   loadableUrlFor,
   normalizeAddressInput,
   sharePayloadForTab,
+  shareUnavailableMessageForTab,
   tabOverviewTitleFor,
   urlSchemeFor,
   validateBrowserUrl
@@ -127,6 +128,15 @@ export default function browserTypesTest() {
         expect(payload.title).assertEqual('https://example.com/current');
         expect(payload.description).assertEqual('https://example.com/current');
       }
+    });
+
+    it('explains why a start tab cannot be shared instead of failing silently', 0, () => {
+      expect(shareUnavailableMessageForTab(shareTab('about:blank', 'about:blank', '起始页')))
+        .assertEqual('当前页面没有可分享地址');
+      expect(shareUnavailableMessageForTab(undefined)).assertEqual('当前没有可分享的页面');
+      expect(shareUnavailableMessageForTab(
+        shareTab('https://example.com', 'https://example.com', 'Example Domain')
+      )).assertEqual('');
     });
   });
 }

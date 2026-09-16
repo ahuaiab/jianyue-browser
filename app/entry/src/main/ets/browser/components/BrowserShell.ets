@@ -176,6 +176,7 @@ import {
   searchQueryForUrl,
   searchQueryTextFor,
   sharePayloadForTab,
+  shareUnavailableMessageForTab,
   tabOverviewTitleFor,
   bookmarkRecordForPage
 } from '../model/BrowserTypes';
@@ -572,16 +573,14 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
 }
 
 class RepositorySessionPort implements SessionPort {
-  private readonly store: TabStore;
-  private readonly repository: BrowserRepository;
+  private readonly saveCallback: () => Promise<void>;
 
-  constructor(store: TabStore, repository: BrowserRepository) {
-    this.store = store;
-    this.repository = repository;
+  constructor(saveCallback: () => Promise<void>) {
+    this.saveCallback = saveCallback;
   }
 
   async save(): Promise<void> {
-    await this.repository.saveSession(this.store.snapshot());
+    await this.saveCallback();
   }
 }
 
@@ -822,6 +821,7 @@ export struct BrowserShell {
   private downloadService: DownloadService | undefined = undefined;
   private downloadLifecycle: BrowserDownloadLifecycle | undefined = undefined;
   private lifecyclePort: BrowserLifecyclePort | undefined = undefined;
+  private browserExitRequested: boolean = false;
   private browserExitCleanupPromise: Promise<void> | undefined = undefined;
   private webTabPool: WebTabPool | undefined = undefined;
   private runtimePort: ArkWebTabRuntimePort | undefined = undefined;
@@ -896,7 +896,7 @@ export struct BrowserShell {
           )) {
           this.cardRevision += 1;
           this.bumpTabStateRevision();
-          void this.repository?.saveSession(this.tabStore.snapshot());
+          void this.saveSession();
         }
         this.logBrowserLifecycle(
           'page_end',
@@ -979,7 +979,7 @@ export struct BrowserShell {
             this.tabStore.updateTabTitle(tabId, searchLabel)) {
             this.cardRevision += 1;
             this.bumpTabStateRevision();
-            void this.repository?.saveSession(this.tabStore.snapshot());
+            void this.saveSession();
           }
           return;
         }
@@ -997,7 +997,7 @@ export struct BrowserShell {
         if (this.tabStore.updateTabTitle(tabId, normalizedTitle)) {
           this.cardRevision += 1;
           this.bumpTabStateRevision();
-          void this.repository?.saveSession(this.tabStore.snapshot());
+          void this.saveSession();
         }
       },
       (tabId: TabId, _controller: webview.WebviewController) => this.setFullScreen(tabId, true),
@@ -1058,7 +1058,7 @@ export struct BrowserShell {
             this.refreshNavigationState(controller);
             this.rememberTabViewState(tabId);
           }
-          void this.repository?.saveSession(this.tabStore.snapshot());
+          void this.saveSession();
         }
       }
     );
@@ -1121,7 +1121,7 @@ export struct BrowserShell {
       this.tabStore,
       this.runtimePort,
       new TabSnapshotCachePort(this.snapshotCache),
-      new RepositorySessionPort(this.tabStore, this.repository)
+      new RepositorySessionPort(() => this.saveSession())
     );
     this.lifecyclePort = new ShellLifecyclePort(
       () => this.handleForeground(),
@@ -2277,7 +2277,7 @@ export struct BrowserShell {
       this.tabStore.restore(snapshot);
     } else if (this.tabStore.tabs.length === 0) {
       this.tabStore.createTab('about:blank', false);
-      await this.repository?.saveSession(this.tabStore.snapshot());
+      await this.saveSession();
     }
     for (const tab of this.tabStore.tabs) {
       this.initializeTabViewState(tab.id);
@@ -2357,13 +2357,25 @@ export struct BrowserShell {
   }
 
   private async saveSession(): Promise<void> {
+    if (this.browserExitRequested) {
+      return;
+    }
     const repository: BrowserRepository | undefined = this.repository;
     if (repository === undefined) {
       return;
     }
     await repository.saveSession(this.tabStore.snapshot());
+    if (this.browserExitRequested) {
+      return;
+    }
     await repository.saveSettings(this.browserSettings);
+    if (this.browserExitRequested) {
+      return;
+    }
     await repository.saveStartPageItems(this.startPageItems);
+    if (this.browserExitRequested) {
+      return;
+    }
     await repository.saveClosedTabs(this.closedTabStack.snapshot());
   }
 
@@ -2614,7 +2626,7 @@ export struct BrowserShell {
         '',
         'web-src-requested'
       );
-      void this.repository?.saveSession(this.tabStore.snapshot());
+      void this.saveSession();
       this.rememberTabViewState(activeId);
       if (!preserveEditorForSubmit) {
         this.addressEditing = false;
@@ -2919,34 +2931,75 @@ export struct BrowserShell {
 
   /** Invoke HarmonyOS system sharing for the active page URL. */
   private async shareActivePage(): Promise<void> {
+    const unavailableMessage: string = shareUnavailableMessageForTab(this.activeTab());
+    if (unavailableMessage.length > 0) {
+      this.showShareFeedback(unavailableMessage);
+      return;
+    }
     const payload: BrowserSharePayload | undefined = sharePayloadForTab(this.activeTab());
     if (payload === undefined) {
+      this.showShareFeedback('当前页面无法分享');
       return;
     }
     const hostContext = this.getUIContext().getHostContext();
     if (hostContext === undefined) {
+      this.showShareFeedback('暂时无法打开系统分享');
       return;
     }
     try {
-      const data: systemShare.SharedData = new systemShare.SharedData({
-        utd: utd.UniformDataType.HYPERLINK,
-        content: payload.url,
-        title: payload.title,
-        label: 'HYPERLINK',
-        description: payload.description
-      });
-      const controller: systemShare.ShareController = new systemShare.ShareController(data);
-      await controller.show(hostContext as common.UIAbilityContext, {
-        selectionMode: systemShare.SelectionMode.SINGLE,
-        previewMode: systemShare.SharePreviewMode.DEFAULT
-      });
+      await this.showSystemShare(hostContext as common.UIAbilityContext, payload,
+        utd.UniformDataType.HYPERLINK, 'HYPERLINK');
       hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
         'share_active_page_succeeded urlLength=%{public}d', payload.url.length);
     } catch (error) {
       const errorCode: number = (error as BusinessError).code ?? -1;
       const errorMessage: string = (error as BusinessError).message ?? 'unknown';
       hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
-        'share_active_page_failed code=%{public}d message=%{public}s', errorCode, errorMessage);
+        'share_active_page_failed code=%{public}d message=%{public}s fallback=plain_text',
+        errorCode, errorMessage);
+      try {
+        await this.showSystemShare(hostContext as common.UIAbilityContext, payload,
+          utd.UniformDataType.PLAIN_TEXT, 'TEXT');
+        hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+          'share_active_page_plain_text_fallback_succeeded urlLength=%{public}d', payload.url.length);
+      } catch (fallbackError) {
+        const fallbackCode: number = (fallbackError as BusinessError).code ?? -1;
+        const fallbackMessage: string = (fallbackError as BusinessError).message ?? 'unknown';
+        hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+          'share_active_page_fallback_failed code=%{public}d message=%{public}s',
+          fallbackCode, fallbackMessage);
+        this.showShareFeedback('分享失败，请稍后重试');
+      }
+    }
+  }
+
+  private async showSystemShare(
+    hostContext: common.UIAbilityContext,
+    payload: BrowserSharePayload,
+    dataType: string,
+    label: string
+  ): Promise<void> {
+    const data: systemShare.SharedData = new systemShare.SharedData({
+      utd: dataType,
+      content: payload.url,
+      title: payload.title,
+      label,
+      description: payload.description
+    });
+    const controller: systemShare.ShareController = new systemShare.ShareController(data);
+    await controller.show(hostContext, {
+      selectionMode: systemShare.SelectionMode.SINGLE,
+      previewMode: systemShare.SharePreviewMode.DEFAULT
+    });
+  }
+
+  private showShareFeedback(message: string): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message });
+    } catch (error) {
+      const errorCode: number = (error as BusinessError).code ?? -1;
+      hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+        'share_feedback_failed code=%{public}d', errorCode);
     }
   }
 
@@ -3292,6 +3345,7 @@ export struct BrowserShell {
   }
 
   private closeTabsForBrowserExit(): Promise<void> {
+    this.browserExitRequested = true;
     if (this.browserExitCleanupPromise === undefined) {
       this.browserExitCleanupPromise = this.performBrowserExitCleanup();
     }
@@ -3365,7 +3419,7 @@ export struct BrowserShell {
     this.logLoadUrl(record.url, 'reopen-closed-tab', 'reopenClosedTab', true, id);
     this.attachCurrentHosts();
     this.bumpTabStateRevision();
-    await this.repository?.saveSession(this.tabStore.snapshot());
+    await this.saveSession();
     await this.repository?.saveClosedTabs(this.closedTabStack.snapshot());
   }
 
@@ -4237,7 +4291,7 @@ export struct BrowserShell {
     if (moved) {
       this.attachCurrentHosts();
       this.bumpTabStateRevision();
-      void this.repository?.saveSession(this.tabStore.snapshot());
+      void this.saveSession();
     }
     this.cardRevision += 1;
   }

@@ -34,6 +34,7 @@ const MAX_CLOSED_TABS: number = 20;
 
 export class BrowserRepository {
   private readonly store: KeyValueStore;
+  private sessionOperation: Promise<void> = Promise.resolve();
 
   constructor(store: KeyValueStore) {
     this.store = store;
@@ -53,35 +54,46 @@ export class BrowserRepository {
   }
 
   async saveSession(snapshot: BrowserSessionSnapshot): Promise<void> {
-    const tabs: BrowserTabRecord[] = snapshot.tabs
-      .filter((tab: BrowserTabRecord) => !tab.isPrivate)
-      .map((tab: BrowserTabRecord) => this.copyTab(tab));
-    if (tabs.length === 0) {
-      return;
-    }
-    const activeTabId: string = tabs.some((tab: BrowserTabRecord) => tab.id === snapshot.activeTabId)
-      ? snapshot.activeTabId
-      : tabs[0].id;
-    const safeSnapshot: BrowserSessionSnapshot = {
-      version: 1,
-      activeTabId,
-      tabs
-    };
-    const active: string = await this.store.getString(ACTIVE_SLOT_KEY, 'a');
-    const targetKey: string = active === 'b' ? SLOT_A_KEY : SLOT_B_KEY;
-    const targetMarker: string = targetKey === SLOT_A_KEY ? 'a' : 'b';
-    await this.store.putString(targetKey, JSON.stringify(safeSnapshot));
-    await this.store.flush();
-    await this.store.putString(ACTIVE_SLOT_KEY, targetMarker);
-    await this.store.flush();
+    await this.enqueueSessionOperation(async (): Promise<void> => {
+      const tabs: BrowserTabRecord[] = snapshot.tabs
+        .filter((tab: BrowserTabRecord) => !tab.isPrivate)
+        .map((tab: BrowserTabRecord) => this.copyTab(tab));
+      if (tabs.length === 0) {
+        return;
+      }
+      const activeTabId: string = tabs.some((tab: BrowserTabRecord) => tab.id === snapshot.activeTabId)
+        ? snapshot.activeTabId
+        : tabs[0].id;
+      const safeSnapshot: BrowserSessionSnapshot = {
+        version: 1,
+        activeTabId,
+        tabs
+      };
+      const active: string = await this.store.getString(ACTIVE_SLOT_KEY, 'a');
+      const targetKey: string = active === 'b' ? SLOT_A_KEY : SLOT_B_KEY;
+      const targetMarker: string = targetKey === SLOT_A_KEY ? 'a' : 'b';
+      await this.store.putString(targetKey, JSON.stringify(safeSnapshot));
+      await this.store.flush();
+      await this.store.putString(ACTIVE_SLOT_KEY, targetMarker);
+      await this.store.flush();
+    });
   }
 
   /** Clear both session slots so a destroyed browser window cannot restore old tabs. */
   async clearSession(): Promise<void> {
-    await this.store.putString(SLOT_A_KEY, '');
-    await this.store.putString(SLOT_B_KEY, '');
-    await this.store.putString(ACTIVE_SLOT_KEY, 'a');
-    await this.store.flush();
+    await this.enqueueSessionOperation(async (): Promise<void> => {
+      await this.store.putString(SLOT_A_KEY, '');
+      await this.store.putString(SLOT_B_KEY, '');
+      await this.store.putString(ACTIVE_SLOT_KEY, 'a');
+      await this.store.flush();
+    });
+  }
+
+  /** Serialize save and exit-clear writes so a late save cannot restore a closed session. */
+  private enqueueSessionOperation(operation: () => Promise<void>): Promise<void> {
+    const next: Promise<void> = this.sessionOperation.then(operation, operation);
+    this.sessionOperation = next.then(() => undefined, () => undefined);
+    return next;
   }
 
   async recordHistory(record: HistoryRecord, isPrivate: boolean): Promise<void> {

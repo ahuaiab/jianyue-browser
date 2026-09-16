@@ -375,6 +375,14 @@ export function lastValidUrlForTab(tab: BrowserTabRecord): string {
   return legacyUrl ?? 'about:blank';
 }
 
+/** Explain why the current tab cannot open the system share panel. */
+export function shareUnavailableMessageForTab(tab: BrowserTabRecord | undefined): string {
+  if (tab === undefined) {
+    return '当前没有可分享的页面';
+  }
+  return lastValidUrlForTab(tab) === 'about:blank' ? '当前页面没有可分享地址' : '';
+}
+
 /** Build the system-share record from the current navigable page identity. */
 export function sharePayloadForTab(tab: BrowserTabRecord | undefined): BrowserSharePayload | undefined {
   if (tab === undefined) {

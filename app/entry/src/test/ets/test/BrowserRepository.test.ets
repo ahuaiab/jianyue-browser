@@ -30,6 +30,33 @@ class FakeKeyValueStore implements KeyValueStore {
   }
 }
 
+class ExitRaceKeyValueStore implements KeyValueStore {
+  private readonly values: Map<string, string> = new Map();
+  private activeReadStarted: boolean = false;
+  private activeReadDelayed: boolean = false;
+
+  async getString(key: string, fallback: string): Promise<string> {
+    if (key === 'session.active' && !this.activeReadDelayed) {
+      this.activeReadDelayed = true;
+      this.activeReadStarted = true;
+      await new Promise<void>((resolve: () => void) => setTimeout(resolve, 0));
+    }
+    return this.values.get(key) ?? fallback;
+  }
+
+  async putString(key: string, value: string): Promise<void> {
+    this.values.set(key, value);
+  }
+
+  async flush(): Promise<void> {}
+
+  async waitForActiveRead(): Promise<void> {
+    while (!this.activeReadStarted) {
+      await new Promise<void>((resolve: () => void) => setTimeout(resolve, 0));
+    }
+  }
+}
+
 function normalSession(): BrowserSessionSnapshot {
   return {
     version: 1,
@@ -72,6 +99,16 @@ export default function browserRepositoryTest() {
       await repository.clearSession();
       expect(await repository.loadSession()).assertUndefined();
       expect(store.allValues().join('').includes('https://normal.example')).assertFalse();
+    });
+
+    it('serializes an exit clear after an in-flight session save', 0, async () => {
+      const store: ExitRaceKeyValueStore = new ExitRaceKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      const savePromise: Promise<void> = repository.saveSession(normalSession());
+      await store.waitForActiveRead();
+      await repository.clearSession();
+      await savePromise;
+      expect(await repository.loadSession()).assertUndefined();
     });
 
     it('does not persist private tabs or private history', 0, async () => {
