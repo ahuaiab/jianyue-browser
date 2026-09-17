@@ -19,8 +19,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BrowserLifecycleRegistry } from '../browser/lifecycle/BrowserLifecyclePort';
 import {
-  clearPendingExternalUrl,
-  setPendingExternalUrl
+  clearPendingExternalUrl, setPendingExternalUrl
 } from '../browser/model/BrowserLaunchState';
 
 const DOMAIN = 0x0000;
@@ -52,6 +51,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    void BrowserLifecycleRegistry.onDestroy();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
   }
 

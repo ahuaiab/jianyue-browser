@@ -1,27 +1,21 @@
-import { uiMaterial } from '@kit.ArkUI';
-import { curves } from '@kit.ArkUI';
+import { curves, uiMaterial } from '@kit.ArkUI';
 import {
+  availableBrowserSearchEngines,
   BrowserSearchEngine,
-  CustomSearchEngine,
   BrowserSettings,
   copyBrowserSettings,
+  CustomSearchEngine,
   DEFAULT_BROWSER_SETTINGS,
-  availableBrowserSearchEngines,
   normalizeCustomSearchEngine
 } from '../model/BrowserSettings';
 import { searchEngineLabel } from '../model/BrowserTypes';
-import {
-  StartPageItem,
-  StartPageItemType,
-  copyStartPageItem,
-  sortStartPageItems
-} from '../model/StartPageModels';
+import { copyStartPageItem, sortStartPageItems, StartPageItem, StartPageItemType } from '../model/StartPageModels';
 import {
   HARMONY_RADIUS_CARD,
   HARMONY_RADIUS_SHEET,
-  START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
-  START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP
+  START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP,
+  START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE
 } from '../model/BrowserVisualMetrics';
 
 /**

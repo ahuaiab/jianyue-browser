@@ -3,10 +3,10 @@ import {
   PermissionDecision,
   PermissionPromptPort,
   WebGeolocationEventPort,
+  WebPermissionCoordinator,
   WebPermissionRequestHandler,
   WebPermissionRequestPort,
   WebResourceKind,
-  WebPermissionCoordinator,
   webResourceKindForProtectedResource
 } from './WebPermissionCoordinator';
 

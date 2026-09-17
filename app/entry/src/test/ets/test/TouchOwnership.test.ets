@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
-  TouchOwner,
   beginTouchOwnership,
   cancelButtonClickForPan,
-  shouldDispatchButtonClick
+  shouldDispatchButtonClick,
+  TouchOwner
 } from '../../../main/ets/browser/gesture/TouchOwnership';
-import { TabBarRect, isPointInTabBar } from '../../../main/ets/browser/gesture/TabBarGestureGate';
+import { isPointInTabBar, TabBarRect } from '../../../main/ets/browser/gesture/TabBarGestureGate';
 
 export default function touchOwnershipTest() {
   describe('TouchOwnership', () => {

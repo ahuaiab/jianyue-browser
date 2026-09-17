@@ -134,6 +134,20 @@ export interface LibraryEntry {
   timestamp: number;
 }
 
+/** Keep a library row attached to the same UI node while neighboring rows change. */
+export function libraryEntryRenderKey(entry: LibraryEntry): string {
+  return entry.id;
+}
+
+/** Build the history source used by the sheet after an optimistic deletion. */
+export function visibleHistoryRecords(
+  records: HistoryRecord[],
+  hiddenEntryIds: string[]
+): HistoryRecord[] {
+  return records.filter((record: HistoryRecord) =>
+    hiddenEntryIds.indexOf(`history-${record.visitedAt}-${record.url}`) < 0);
+}
+
 function copyEntry(entry: LibraryEntry): LibraryEntry {
   return {
     id: entry.id,
@@ -153,8 +167,8 @@ function validEntry(entry: LibraryEntry): boolean {
 }
 
 function historyToEntries(records: HistoryRecord[]): LibraryEntry[] {
-  return records.map((record: HistoryRecord, index: number): LibraryEntry => ({
-    id: `history-${index}-${record.url}`,
+  return records.map((record: HistoryRecord): LibraryEntry => ({
+    id: `history-${record.visitedAt}-${record.url}`,
     section: LibrarySection.HISTORY,
     title: record.title,
     url: record.url,

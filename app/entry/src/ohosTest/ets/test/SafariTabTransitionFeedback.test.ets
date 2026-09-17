@@ -1,26 +1,26 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { TabPreviewKind } from '../../../main/ets/browser/model/TabGestureMotion';
 import {
+  addressPreviewOpacity,
+  addressPreviewSurfaceVisual,
+  newTabHandoffVisual,
+  shouldPreferStableStartPageFrame,
   shouldPrimeFinalTabPreview,
   shouldRenderAddressItem,
   shouldRenderPendingTabPreview,
-  shouldRenderTabPreviewContent,
-  shouldPreferStableStartPageFrame,
-  newTabHandoffVisual,
-  addressPreviewOpacity,
-  addressPreviewSurfaceVisual
+  shouldRenderTabPreviewContent
 } from '../../../main/ets/browser/model/SafariTabTransition';
 import {
-  addressEditorText,
-  syncAddressDraft,
-  canStartAddressStripGesture,
-  shouldWaitForOverviewClose,
-  shouldWaitForTabOverviewSnapshot,
-  closedAddressEditorState,
   addressCollapsedTextPaddingFor,
   addressEditorLeftPaddingFor,
+  addressEditorText,
   addressInputLeftPaddingFor,
-  addressTextColorFor
+  addressTextColorFor,
+  canStartAddressStripGesture,
+  closedAddressEditorState,
+  shouldWaitForOverviewClose,
+  shouldWaitForTabOverviewSnapshot,
+  syncAddressDraft
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
@@ -67,6 +67,7 @@ export default function safariTabTransitionFeedbackTest() {
       expect(start.plusScale).assertEqual(1);
       expect(start.placeholderScale).assertEqual(1);
       expect(start.placeholderSlideProgress).assertEqual(1);
+      expect(start.placeholderTextAlignment).assertEqual('center');
       const crossfade = newTabHandoffVisual(0.5);
       expect(crossfade.plusOpacity > 0.25).assertTrue();
       expect(crossfade.placeholderOpacity > 0.25).assertTrue();
@@ -75,6 +76,7 @@ export default function safariTabTransitionFeedbackTest() {
       expect(crossfade.plusScale).assertEqual(1);
       expect(crossfade.placeholderScale).assertEqual(1);
       expect(crossfade.placeholderSlideProgress).assertEqual(1);
+      expect(crossfade.placeholderTextAlignment).assertEqual('center');
       const earlyCrossfade = newTabHandoffVisual(0.15);
       expect(earlyCrossfade.plusOpacity < 1).assertTrue();
       expect(earlyCrossfade.placeholderOpacity > 0).assertTrue();
@@ -87,6 +89,7 @@ export default function safariTabTransitionFeedbackTest() {
       expect(finish.plusScale).assertEqual(1);
       expect(finish.placeholderScale).assertEqual(1);
       expect(finish.placeholderSlideProgress).assertEqual(1);
+      expect(finish.placeholderTextAlignment).assertEqual('center');
     });
 
     it('keeps the new start-page handoff on its captured frame', 0, () => {

@@ -1,11 +1,8 @@
 import {
-  committedUrlForTabState,
-  loadableUrlFor,
-  searchQueryTextFor
+  committedUrlForTabState, loadableUrlFor, searchQueryTextFor
 } from './BrowserTypes';
 import {
-  SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP,
-  SAFARI_ADDRESS_LOCK_SAFE_INSET_VP
+  SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP, SAFARI_ADDRESS_LOCK_SAFE_INSET_VP
 } from './BrowserVisualMetrics';
 
 /**

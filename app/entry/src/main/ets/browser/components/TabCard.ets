@@ -1,26 +1,19 @@
-import {
-  BrowserTabRecord,
-  GestureSample,
-  lastValidUrlForTab,
-  TabId,
-  tabOverviewTitleFor
-} from '../model/BrowserTypes';
+import { BrowserTabRecord, GestureSample, lastValidUrlForTab, TabId, tabOverviewTitleFor } from '../model/BrowserTypes';
 import { image } from '@kit.ImageKit';
 import { SymbolGlyphModifier, uiMaterial } from '@kit.ArkUI';
 import {
   TAB_CARD_MENU_DESTRUCTIVE_COLOR,
   TAB_CARD_MENU_LABELS,
-  TAB_OVERVIEW_LAYOUT,
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
+  TAB_OVERVIEW_LAYOUT,
+  tabCardMenuItemIsDestructive,
   tabOverviewCardCaptionVisualOpacity,
-  tabOverviewLivePageCloseFrame,
   TabOverviewLivePageCloseFrame,
-  tabCardMenuItemIsDestructive
+  tabOverviewLivePageCloseFrame
 } from '../model/TabOverviewActions';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
-import {
-  HARMONY_RADIUS_CARD
-} from '../model/BrowserVisualMetrics';
+import { HARMONY_RADIUS_CARD } from '../model/BrowserVisualMetrics';
+import { TopAlignedPixelMapImage } from './TopAlignedPixelMapImage';
 
 /**
  * A Safari-style tab card: the live page preview and its title/close row are
@@ -36,6 +29,8 @@ export struct TabCard {
   @Param cardHeight: number = TAB_OVERVIEW_LAYOUT.cardHeight;
   /** Visual breathing room below the system safe area in the overview grid. */
   @Param topOffset: number = 0;
+  /** Top avoid-area offset after the live page has been scaled into this card. */
+  @Param thumbnailTopOffset: number = 0;
   @Param isActive: boolean = false;
   /** When true, the mounted live page is visible through this card shell. */
   @Param livePreview: boolean = false;
@@ -236,10 +231,12 @@ export struct TabCard {
         .height('100%')
         .backgroundColor(Color.Transparent);
     } else if (this.thumbnail !== undefined) {
-      Image(this.thumbnail)
+      TopAlignedPixelMapImage({
+        source: this.thumbnail,
+        topOffset: this.thumbnailTopOffset
+      })
         .width('100%')
-        .height('100%')
-        .objectFit(ImageFit.Cover);
+        .height('100%');
     } else {
       // Do not draw a synthetic placeholder. The overview is a snapshot of
       // the actual page; until the system PixelMap is ready, keep this area

@@ -1,12 +1,8 @@
 import { curves } from '@kit.ArkUI';
+import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from '../model/DownloadModels';
 import {
-  DownloadBackend,
-  DownloadStatus,
-  DownloadTaskRecord
-} from '../model/DownloadModels';
-import {
-  HARMONY_RADIUS_COMPACT,
   HARMONY_RADIUS_CARD,
+  HARMONY_RADIUS_COMPACT,
   HARMONY_RADIUS_SHEET,
   LIBRARY_CONTENT_WIDTH_PERCENT
 } from '../model/BrowserVisualMetrics';

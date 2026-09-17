@@ -1,11 +1,6 @@
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
-import {
-  BrowserTabRecord,
-  PendingTabDraft,
-  lastValidUrlForTab,
-  searchQueryForUrl
-} from '../model/BrowserTypes';
+import { BrowserTabRecord, lastValidUrlForTab, PendingTabDraft, searchQueryForUrl } from '../model/BrowserTypes';
 import {
   SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
@@ -17,14 +12,15 @@ import {
   ADDRESS_SEARCH_BAR_TOP_PADDING,
   TabOverviewChromeFrame
 } from '../model/TabOverviewActions';
-import { TabBarRect, isPointInTabBar } from '../gesture/TabBarGestureGate';
-import { TouchOwner, beginTouchOwnership } from '../gesture/TouchOwnership';
+import { isPointInTabBar, TabBarRect } from '../gesture/TabBarGestureGate';
+import { beginTouchOwnership, TouchOwner } from '../gesture/TouchOwnership';
 import {
   addressItemLeft,
   addressPreviewOpacity,
   addressPreviewSurfaceVisual,
-  newTabPreviewVisual,
   newTabHandoffVisual,
+  newTabPreviewVisual,
+  pendingTabVisualIndex,
   shouldRenderAddressHandoff,
   shouldRenderAddressItem,
   shouldRenderPendingTabPreview
@@ -32,11 +28,7 @@ import {
 import { addressTextColorFor } from '../model/BrowserInteraction';
 import { TabPreviewKind } from '../model/TabGestureMotion';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
-import {
-  AddressSearchBar,
-  AddressSearchBarDownloadProps,
-  addressSearchBarDownloadProps
-} from './AddressSearchBar';
+import { AddressSearchBar, AddressSearchBarDownloadProps, addressSearchBarDownloadProps } from './AddressSearchBar';
 
 const ADDRESS_PREVIEW_SURFACE = addressPreviewSurfaceVisual(ADDRESS_SEARCH_BAR_STYLE.cornerRadius);
 
@@ -189,8 +181,8 @@ export struct AddressTabStrip {
   }
 
   private handoffPlaceholderTranslateX(): number {
-    // The reference keeps the placeholder at its final left inset while its
-    // opacity crossfades with the centered plus.
+    // Keep the placeholder on the same centered track as the normal collapsed
+    // address field; the handoff must not introduce a second horizontal jump.
     return 0;
   }
 
@@ -198,8 +190,15 @@ export struct AddressTabStrip {
     return this.pendingTab !== undefined && this.previewKind === TabPreviewKind.NEW_TAB;
   }
 
+  private pendingItemIndex(): number {
+    return pendingTabVisualIndex(
+      this.pendingTab?.tab.id ?? '',
+      this.tabs.map((tab: BrowserTabRecord): string => tab.id)
+    );
+  }
+
   private handoffIndex(): number {
-    return this.handoffUsesPendingSlot() ? this.tabs.length : this.activeIndex;
+    return this.handoffUsesPendingSlot() ? this.pendingItemIndex() : this.activeIndex;
   }
 
   private touchPoint(event: TouchEvent): TouchObject | undefined {
@@ -325,7 +324,7 @@ export struct AddressTabStrip {
           .id('pending-address-tab-item')
           .width(this.itemWidth())
           .height(ADDRESS_SEARCH_BAR_STYLE.height)
-          .position({ x: this.itemOffset(this.tabs.length), y: ADDRESS_SEARCH_BAR_TOP_PADDING })
+          .position({ x: this.itemOffset(this.pendingItemIndex()), y: ADDRESS_SEARCH_BAR_TOP_PADDING })
           .backgroundColor(Color.Transparent)
           .borderRadius(ADDRESS_PREVIEW_SURFACE.cornerRadius)
           .clip(ADDRESS_PREVIEW_SURFACE.clipsChildren)
@@ -344,9 +343,11 @@ export struct AddressTabStrip {
             .fontColor(addressTextColorFor(false))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .textAlign(TextAlign.Start)
+            .textAlign(newTabHandoffVisual(this.addressHandoffProgress).placeholderTextAlignment === 'start'
+              ? TextAlign.Start
+              : TextAlign.Center)
             .width('100%')
-            .padding({ left: 11, right: 11 })
+            .padding({ left: 0, right: 0 })
             .opacity(this.handoffPlaceholderOpacity())
             .scale({ x: this.handoffPlaceholderScale(), y: this.handoffPlaceholderScale() })
             .translate({ x: this.handoffPlaceholderTranslateX(), y: 0, z: 0 });

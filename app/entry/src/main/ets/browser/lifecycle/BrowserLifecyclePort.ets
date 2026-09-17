@@ -2,6 +2,8 @@ export interface BrowserLifecyclePort {
   /** Reattach the active web surface after the ability returns to foreground. */
   onForeground(): void;
   onBackground(): Promise<void>;
+  /** Clear browser session state when the ability is destroyed by the system. */
+  onDestroy(): Promise<void>;
   /** Close tabs and release browser-owned caches before the window is gone. */
   onWindowStageDestroy(): Promise<void>;
   onMemoryPressure(level: number): void;
@@ -30,6 +32,10 @@ export class BrowserLifecycleRegistry {
 
   static async onBackground(): Promise<void> {
     await BrowserLifecycleRegistry.active?.onBackground();
+  }
+
+  static async onDestroy(): Promise<void> {
+    await BrowserLifecycleRegistry.active?.onDestroy();
   }
 
   static async onWindowStageDestroy(): Promise<void> {

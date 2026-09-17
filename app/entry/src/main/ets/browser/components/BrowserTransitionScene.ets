@@ -2,6 +2,7 @@ import { image } from '@kit.ImageKit';
 import { RectShape } from '@kit.ArkUI';
 import { BrowserErrorView } from './BrowserErrorView';
 import { StartPage } from './StartPage';
+import { TopAlignedPixelMapImage } from './TopAlignedPixelMapImage';
 import { BrowserSettings } from '../model/BrowserSettings';
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
@@ -9,20 +10,20 @@ import { BrowserErrorState } from '../model/BrowserTypes';
 import { StartPageItem } from '../model/StartPageModels';
 import { TabPreviewKind as MotionPreviewKind } from '../model/TabGestureMotion';
 import {
+  shouldPreferStableStartPageFrame,
+  shouldRenderTabPreviewContent,
   TabTransitionSceneVisualState,
-  tabTransitionSceneVisualState,
-  shouldPreferStableStartPageFrame
+  tabTransitionSceneVisualState
 } from '../model/SafariTabTransition';
 import {
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
-  TabOverviewPageFrame,
   tabOverviewCaptionLocalRadius,
   TabOverviewLivePageCloseFrame,
-  tabOverviewLivePageCloseFrame
+  tabOverviewLivePageCloseFrame,
+  TabOverviewPageFrame
 } from '../model/TabOverviewActions';
-import { shouldRenderTabPreviewContent } from '../model/SafariTabTransition';
 import { WebNodeHostController } from '../web/WebTabNode';
-import { availableContentHeight, visibleContentHeight } from '../model/WindowAvoidance';
+import { availableContentHeight } from '../model/WindowAvoidance';
 
 /**
  * Native ArkUI page scene for Safari-style tab transitions.
@@ -99,7 +100,10 @@ export struct BrowserTransitionScene {
   }
 
   private backgroundViewportHeight(): number {
-    return visibleContentHeight(this.viewportHeight, this.topContentInset, this.bottomContentInset);
+    // The bottom browser bar is a floating material surface over the page.
+    // Keep the start-page image behind it so the system immersive material has
+    // real page content to blend with instead of revealing a white gap.
+    return this.pageContentHeight();
   }
 
   private pageContentTop(): number {
@@ -239,20 +243,18 @@ export struct BrowserTransitionScene {
               ? HitTestMode.None
               : HitTestMode.Default);
           if (this.shouldShowStableCurrentFrame() && this.currentThumbnail !== undefined) {
-            Image(this.currentThumbnail)
+            TopAlignedPixelMapImage({ source: this.currentThumbnail })
               .width('100%')
               .height('100%')
-              .objectFit(ImageFit.Cover)
               .hitTestBehavior(HitTestMode.None);
           }
         }
           .width('100%')
           .height('100%');
       } else if (this.currentThumbnail !== undefined) {
-        Image(this.currentThumbnail)
+        TopAlignedPixelMapImage({ source: this.currentThumbnail })
           .width('100%')
           .height('100%')
-          .objectFit(ImageFit.Cover)
           .hitTestBehavior(HitTestMode.None);
       }
       if (this.errorState !== undefined) {
@@ -285,10 +287,9 @@ export struct BrowserTransitionScene {
           .clip(true)
           .hitTestBehavior(HitTestMode.None);
       } else if (this.previewThumbnail !== undefined) {
-        Image(this.previewThumbnail)
+        TopAlignedPixelMapImage({ source: this.previewThumbnail })
           .width('100%')
           .height('100%')
-          .objectFit(ImageFit.Cover)
           .hitTestBehavior(HitTestMode.None);
       } else if (this.previewIsStartPage) {
         StartPage({

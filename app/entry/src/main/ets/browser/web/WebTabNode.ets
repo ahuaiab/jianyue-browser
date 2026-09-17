@@ -1,8 +1,5 @@
 import {
-  BuilderNode,
-  FrameNode,
-  NodeController,
-  UIContext
+  BuilderNode, FrameNode, NodeController, UIContext
 } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';

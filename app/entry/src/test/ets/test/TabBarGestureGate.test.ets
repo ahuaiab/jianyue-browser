@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  isPointInTabBar,
   TAB_BAR_TOUCH_TOLERANCE_VP,
-  TabBarRect,
-  isPointInTabBar
+  TabBarRect
 } from '../../../main/ets/browser/gesture/TabBarGestureGate';
 
 export default function tabBarGestureGateTest() {

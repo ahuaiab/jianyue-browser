@@ -3,9 +3,7 @@ import { NodeController } from '@kit.ArkUI';
 import { BrowserTabRecord, TabId, TabResidency } from '../../../main/ets/browser/model/BrowserTypes';
 import { TabStore } from '../../../main/ets/browser/store/TabStore';
 import {
-  WebRuntimeFactory,
-  WebRuntimeHandle,
-  WebTabPool
+  WebRuntimeFactory, WebRuntimeHandle, WebTabPool
 } from '../../../main/ets/browser/web/WebTabPool';
 
 class FakeWebRuntimeHandle implements WebRuntimeHandle {

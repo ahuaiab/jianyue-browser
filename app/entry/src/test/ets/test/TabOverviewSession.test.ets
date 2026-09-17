@@ -1,8 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { BrowserTabRecord, TabId } from '../../../main/ets/browser/model/BrowserTypes';
 import {
-  PageDisplayState,
-  PageFontSize
+  PageDisplayState, PageFontSize
 } from '../../../main/ets/browser/model/PageDisplayState';
 import { TabStore } from '../../../main/ets/browser/store/TabStore';
 import {

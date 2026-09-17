@@ -1,7 +1,5 @@
 import {
-  PageAction,
-  pageModeMenuLabel,
-  pageModeMenuSymbolName
+  PageAction, pageModeMenuLabel, pageModeMenuSymbolName
 } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
 import { deviceInfo } from '@kit.BasicServicesKit';

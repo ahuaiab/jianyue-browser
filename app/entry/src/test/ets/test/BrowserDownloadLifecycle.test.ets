@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from
-  '../../../main/ets/browser/model/DownloadModels';
+import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from '../../../main/ets/browser/model/DownloadModels';
 import {
   BrowserDownloadLifecycle,
   BrowserDownloadServicePort

@@ -1,31 +1,34 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
-  TabOverviewPageFrame,
-  tabOverviewPageFrame,
-  tabOverviewGridOpacityAtProgress,
-  tabOverviewSpringVelocity,
-  tabOverviewSpringEasing,
+  shouldMountAddressTransitionLayer,
+  shouldMountBottomBrowserBar,
+  TAB_OVERVIEW_CAPTION_FONT_SIZE,
+  tabOverviewAddressLayerZIndex,
   tabOverviewBorderOwner,
-  tabOverviewLiveCaptionOpacity,
-  tabOverviewCardCaptionVisualOpacity,
+  tabOverviewBottomChromeZIndex,
+  tabOverviewCaptionHandoffOpacity,
   tabOverviewCaptionLocalRadius,
+  tabOverviewCardCaptionVisualOpacity,
   tabOverviewChromeFrame,
   TabOverviewChromeFrame,
-  tabOverviewCaptionHandoffOpacity,
   tabOverviewChromeOpacity,
   tabOverviewChromeTranslateY,
-  shouldMountBottomBrowserBar,
-  shouldMountAddressTransitionLayer,
-  tabOverviewAddressLayerZIndex,
-  tabOverviewBottomChromeZIndex,
-  TAB_OVERVIEW_CAPTION_FONT_SIZE
+  tabOverviewGridOpacityAtProgress,
+  tabOverviewActiveCardScrollOffset,
+  tabOverviewGridMaxScrollOffset,
+  tabOverviewLiveCaptionOpacity,
+  TAB_OVERVIEW_LAYOUT,
+  TabOverviewPageFrame,
+  tabOverviewPageFrame,
+  tabOverviewSpringEasing,
+  tabOverviewSpringVelocity
 } from '../../../main/ets/browser/model/TabOverviewActions';
 import { verticalOverviewGestureMotion } from '../../../main/ets/browser/model/TabGestureMotion';
 import { BROWSER_MODAL_Z_INDEX } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
 export default function tabOverviewTransitionTest() {
   describe('TabOverviewTransition', () => {
-    it('starts the overview page transform as the full page', 0, () => {
+    it('starts the overview page transform with the screen border radius', 0, () => {
       const frame: TabOverviewPageFrame = tabOverviewPageFrame(0, 400, 800, 0, 0);
       expect(frame.scaleX).assertEqual(1);
       expect(frame.scaleY).assertEqual(1);
@@ -35,8 +38,17 @@ export default function tabOverviewTransitionTest() {
       expect(frame.clipTop).assertEqual(0);
       expect(frame.clipWidth).assertEqual(400);
       expect(frame.clipHeight).assertEqual(800);
-      expect(frame.cornerRadius).assertEqual(0);
+      expect(frame.cornerRadius).assertEqual(TAB_OVERVIEW_LAYOUT.cardRadius);
       expect(frame.borderWidth).assertEqual(0);
+    });
+
+    it('keeps the live page border radius fixed throughout the overview transform', 0, () => {
+      const first: TabOverviewPageFrame = tabOverviewPageFrame(0, 400, 800, 0, 0);
+      const middle: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 0);
+      const settled: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 0, 0);
+      expect(first.cornerRadius).assertEqual(TAB_OVERVIEW_LAYOUT.cardRadius);
+      expect(middle.cornerRadius).assertEqual(TAB_OVERVIEW_LAYOUT.cardRadius);
+      expect(settled.cornerRadius).assertEqual(TAB_OVERVIEW_LAYOUT.cardRadius);
     });
 
     it('lands the live page on the active two-column card slot', 0, () => {
@@ -51,6 +63,41 @@ export default function tabOverviewTransitionTest() {
       expect(frame.clipHeight.toFixed(6)).assertEqual('242.000000');
       expect(frame.cornerRadius).assertEqual(16);
       expect(frame.borderWidth).assertEqual(2);
+    });
+
+    it('brings a deep active card into the first visible overview row', 0, () => {
+      const firstRowOffset: number = tabOverviewActiveCardScrollOffset(0);
+      const thirdRowOffset: number = tabOverviewActiveCardScrollOffset(4);
+      const firstRow: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 0, 0, 0, firstRowOffset);
+      const thirdRow: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 4, 0, 0, thirdRowOffset);
+      expect(firstRowOffset).assertEqual(0);
+      expect(thirdRowOffset).assertEqual((TAB_OVERVIEW_LAYOUT.cardHeight + TAB_OVERVIEW_LAYOUT.gap) * 2);
+      expect(thirdRow.clipTop).assertEqual(firstRow.clipTop);
+      expect(thirdRow.clipHeight).assertEqual(firstRow.clipHeight);
+    });
+
+    it('clamps the last active row to the Grid content end', 0, () => {
+      const maxScrollOffset: number = tabOverviewGridMaxScrollOffset(19, 800, 0, 0);
+      const lastRowOffset: number = tabOverviewActiveCardScrollOffset(18, maxScrollOffset);
+      const rawLastRowOffset: number = tabOverviewActiveCardScrollOffset(18);
+      expect(lastRowOffset).assertEqual(maxScrollOffset);
+      expect(lastRowOffset < rawLastRowOffset).assertTrue();
+      const lastRow: TabOverviewPageFrame = tabOverviewPageFrame(
+        1, 400, 800, 18, 0, 0, lastRowOffset
+      );
+      expect(lastRow.clipTop).assertEqual(488);
+    });
+
+    it('moves the live page with the measured Grid scroll offset', 0, () => {
+      const atGridOrigin: TabOverviewPageFrame = tabOverviewPageFrame(
+        1, 400, 800, 4, 0, 0, 0
+      );
+      const afterGridScroll: TabOverviewPageFrame = tabOverviewPageFrame(
+        1, 400, 800, 4, 0, 0, 120
+      );
+      expect(afterGridScroll.clipTop).assertEqual(atGridOrigin.clipTop - 120);
+      expect(afterGridScroll.translateY).assertEqual(atGridOrigin.translateY - 120);
+      expect(afterGridScroll.captionLocalTop).assertEqual(atGridOrigin.captionLocalTop);
     });
 
     it('keeps the card grid hidden until the hero reaches handoff', 0, () => {

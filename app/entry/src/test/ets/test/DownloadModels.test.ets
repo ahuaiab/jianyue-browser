@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  classifyDownload,
   DownloadBackend,
   DownloadStatus,
   DownloadTaskRecord,
-  classifyDownload,
   percentForDownload
 } from '../../../main/ets/browser/model/DownloadModels';
 import { DownloadRecordStorage, DownloadStore } from '../../../main/ets/browser/data/DownloadStore';

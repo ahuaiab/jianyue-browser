@@ -10,8 +10,8 @@ import { PageAction } from '../browser/model/PageActions';
 import { BrowserSettings, copyBrowserSettings, DEFAULT_BROWSER_SETTINGS } from '../browser/model/BrowserSettings';
 import { PageFontSize } from '../browser/model/PageDisplayState';
 import {
-  BrowserTabRecord,
   BookmarkRecord,
+  BrowserTabRecord,
   GestureSample,
   HistoryRecord,
   TabResidency

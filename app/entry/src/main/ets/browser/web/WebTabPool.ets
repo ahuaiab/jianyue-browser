@@ -1,5 +1,5 @@
 import { NodeController } from '@kit.ArkUI';
-import { BrowserTabRecord, TabId, TabResidency, lastValidUrlForTab } from '../model/BrowserTypes';
+import { BrowserTabRecord, lastValidUrlForTab, TabId, TabResidency } from '../model/BrowserTypes';
 
 export interface WebRuntimeHandle {
   readonly tabId: TabId;

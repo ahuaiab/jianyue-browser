@@ -1,166 +1,165 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { Context } from '@kit.AbilityKit';
 import {
-  BrowserSettings,
+  availableBrowserSearchEngines,
   BrowserSearchEngine,
+  BrowserSettings,
+  copyBrowserSettings,
   CustomSearchEngine,
-  StartPageBackgroundPosition,
   DEFAULT_BROWSER_SETTINGS,
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
-  copyBrowserSettings,
   normalizeBrowserSettings,
-  availableBrowserSearchEngines,
   normalizeCustomSearchEngine,
   normalizeStartPageBackgroundPosition,
   normalizeStartPageBackgroundScale,
+  StartPageBackgroundPosition,
   startPageBackgroundScaleForGesture
 } from '../../../main/ets/browser/model/BrowserSettings';
 import {
+  buildFrequentStartPageItems,
+  shouldRenderStartPageSection,
+  sortStartPageItems,
+  startPageBackgroundSource,
   StartPageItem,
   StartPageItemType,
-  buildFrequentStartPageItems,
-  sortStartPageItems,
-  shouldRenderStartPageSection,
-  startPageBackgroundSource,
   startPageThumbnailMatchesBackground
 } from '../../../main/ets/browser/model/StartPageModels';
+import { ClosedTabRecord, ClosedTabStack } from '../../../main/ets/browser/data/ClosedTabStack';
 import {
-  ClosedTabStack,
-  ClosedTabRecord
-} from '../../../main/ets/browser/data/ClosedTabStack';
-import {
-  PageDisplayState,
   DEFAULT_PAGE_DISPLAY_STATE,
+  PageDisplayState,
   PageFontSize
 } from '../../../main/ets/browser/model/PageDisplayState';
 import { BrowserRepository } from '../../../main/ets/browser/data/BrowserRepository';
 import {
-  KeyValueStore,
+  applicationContextForPreferences,
   ApplicationContextProvider,
-  applicationContextForPreferences
+  KeyValueStore
 } from '../../../main/ets/browser/data/KeyValueStore';
 import {
   BookmarkRecord,
   BrowserTabRecord,
   HistoryRecord,
-  TabResidency,
   normalizeAddressInput,
   searchEngineLabel,
-  searchUrlForEngine
+  searchUrlForEngine,
+  TabResidency
 } from '../../../main/ets/browser/model/BrowserTypes';
 import {
-  filterTabsByQuery,
-  TAB_OVERVIEW_LAYOUT,
-  TAB_OVERVIEW_GESTURE_CARD_HEIGHT,
-  TAB_SEARCH_BAR_STYLE,
   ADDRESS_SEARCH_BAR_STYLE,
   ADDRESS_SEARCH_BAR_TOP_PADDING,
-  TAB_OVERVIEW_BACKGROUND_COLOR,
-  TAB_SEARCH_BAR_BACKGROUND_COLOR,
-  TAB_SEARCH_BAR_CONTENT_INSET,
-  TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
+  filterTabsByQuery,
+  TAB_CARD_MENU_DESTRUCTIVE_COLOR,
   TAB_CARD_MENU_LABELS,
   TAB_CARD_MENU_SYMBOL_NAMES,
-  TAB_CARD_MENU_DESTRUCTIVE_COLOR,
-  tabCardMenuItemIsDestructive,
+  TAB_OVERVIEW_BACKGROUND_COLOR,
+  TAB_OVERVIEW_GESTURE_CARD_HEIGHT,
+  TAB_OVERVIEW_LAYOUT,
+  TAB_SEARCH_BAR_BACKGROUND_COLOR,
+  TAB_SEARCH_BAR_CONTENT_INSET,
+  TAB_SEARCH_BAR_STYLE,
   TAB_SEARCH_PULL_THRESHOLD,
-  tabSearchVisualProgress,
-  tabOverviewTopPaddingForProgress,
+  TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
+  tabCardMenuItemIsDestructive,
   tabOverviewCardWidth,
+  tabOverviewSnapshotSize,
+  tabOverviewThumbnailCrop,
+  tabOverviewThumbnailTopOffset,
+  tabOverviewTopPadding,
+  tabOverviewTopPaddingForProgress,
   tabSearchPullProgress,
-  topContentInset,
-  tabOverviewTopPadding
+  tabSearchVisualProgress,
+  topContentInset
 } from '../../../main/ets/browser/model/TabOverviewActions';
 import {
+  availablePageActions,
+  desktopUserAgentFor,
+  nextFontSize,
   PageAction,
   PageActionAvailability,
-  availablePageActions,
   pageMenuActions,
-  nextFontSize,
-  desktopUserAgentFor,
   pageModeMenuLabel,
   pageModeMenuSymbolName
 } from '../../../main/ets/browser/model/PageActions';
 import {
-  LibrarySection,
-  libraryEntries,
-  librarySectionChrome,
-  librarySectionAfterSwipe,
-  LIBRARY_SECTION_SWIPE_THRESHOLD,
-  LIBRARY_SECTION_SELECTED_BACKGROUND,
-  LIBRARY_SECTION_UNSELECTED_BACKGROUND,
-  librarySectionBackground,
-  libraryBookmarkActionEnabled,
-  LIBRARY_DISMISS_THRESHOLD,
-  libraryDismissProgress,
-  libraryDismissShouldClose,
   filterLibraryEntries,
+  historyDeleteCutoff,
+  HistoryDeleteRange,
+  historyRecordInDeleteRange,
+  historyTimelineGroups,
   HistoryTimelineSection,
   historyTimelineSection,
-  historyTimelineGroups,
-  HistoryDeleteRange,
-  historyDeleteCutoff,
-  historyRecordInDeleteRange,
+  LIBRARY_DISMISS_THRESHOLD,
   LIBRARY_SEARCH_PULL_THRESHOLD,
+  LIBRARY_SECTION_SELECTED_BACKGROUND,
+  LIBRARY_SECTION_SWIPE_THRESHOLD,
+  LIBRARY_SECTION_UNSELECTED_BACKGROUND,
+  LIBRARY_SHEET_HEIGHT_PERCENT,
+  libraryBookmarkActionEnabled,
+  libraryDismissProgress,
+  libraryDismissShouldClose,
+  libraryEntries,
+  libraryEntryRenderKey,
   librarySearchPullProgress,
-  LIBRARY_SHEET_HEIGHT_PERCENT
+  LibrarySection,
+  librarySectionAfterSwipe,
+  librarySectionBackground,
+  librarySectionChrome,
+  visibleHistoryRecords
 } from '../../../main/ets/browser/model/LibraryModels';
 import {
-  webHostInputEnabled,
-  resetBrowserGestureState,
+  addressInputIdentity,
+  browserLifecycleDiagnostic,
+  BrowserLifecycleEventKind,
   committedNavigationUrl,
+  isAddressTransitionCurrent,
+  placeholderForFocus,
+  resetBrowserGestureState,
   shouldActivateWebController,
+  shouldDismissOverviewBeforeCreatingTab,
+  shouldMountTabWebHost,
+  shouldMountWebHost,
   shouldRecoverMissingTabController,
   shouldRecreateBlankTabRuntime,
-  shouldRetryWebHostAttachment,
-  shouldRetryTabSnapshot,
-  shouldDismissOverviewBeforeCreatingTab,
-  shouldMountWebHost,
-  shouldRenderLiveWebHost,
-  shouldMountTabWebHost,
   shouldRefreshHostsForViewport,
-  isAddressTransitionCurrent,
-  addressInputIdentity,
-  placeholderForFocus,
-  BrowserLifecycleEventKind,
-  browserLifecycleDiagnostic
+  shouldRenderLiveWebHost,
+  shouldRetryTabSnapshot,
+  shouldRetryWebHostAttachment,
+  webHostInputEnabled
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import {
   HARMONY_RADIUS_FLOATING,
-  SAFARI_ADDRESS_ITEM_GAP_VP,
+  SAFARI_ACTION_TOOLBAR_HEIGHT_VP,
   SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS,
   SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS,
+  SAFARI_ADDRESS_ITEM_GAP_VP,
+  SAFARI_ADDRESS_ITEM_INSET_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
   SAFARI_ADDRESS_ROW_HEIGHT_VP,
-  SAFARI_ACTION_TOOLBAR_HEIGHT_VP,
-  SAFARI_ADDRESS_ITEM_INSET_VP,
   SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
   SAFARI_BOTTOM_CHROME_RADIUS_VP,
   SAFARI_BOTTOM_CHROME_RAIL_INSET_VP,
+  safariAddressItemWidth,
   safariBottomChromeActionCenter,
   safariBottomChromeActionSlotWidth,
-  safariBottomChromeRailWidth,
-  safariAddressItemWidth
+  safariBottomChromeRailWidth
 } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 import {
-  TAB_RUBBER_BAND_MAX_PULL,
-  NEW_TAB_PULL_START,
   NEW_TAB_PULL_READY_DISTANCE,
-  rubberBandDistance,
-  tabGestureMotion,
-  newTabPullProgress,
+  NEW_TAB_PULL_START,
   newTabBackgroundProgress,
-  TabPreviewKind,
-  tabTransitionVisualState,
+  newTabPullProgress,
   projectedOffset,
+  rubberBandDistance,
+  shouldCommitNewTabPull,
   shouldCommitProjectedSwitch,
-  shouldCommitNewTabPull
+  TAB_RUBBER_BAND_MAX_PULL,
+  tabGestureMotion,
+  TabPreviewKind,
+  tabTransitionVisualState
 } from '../../../main/ets/browser/model/TabGestureMotion';
-import {
-  newTabHandoffVisual,
-  shouldRenderAddressHandoff
-} from '../../../main/ets/browser/model/SafariTabTransition';
+import { newTabHandoffVisual, shouldRenderAddressHandoff } from '../../../main/ets/browser/model/SafariTabTransition';
 import {
   BrowserLifecyclePort,
   BrowserLifecycleRegistry
@@ -227,10 +226,15 @@ class FakePreferenceContext implements ApplicationContextProvider {
 class FakeBackPort implements BrowserLifecyclePort {
   consumeBack: boolean = false;
   foregroundCount: number = 0;
+  destroyCount: number = 0;
 
   async onBackground(): Promise<void> {}
 
   async onWindowStageDestroy(): Promise<void> {}
+
+  async onDestroy(): Promise<void> {
+    this.destroyCount += 1;
+  }
 
   onForeground(): void {
     this.foregroundCount += 1;
@@ -714,6 +718,35 @@ export default function videoParityModelsTest() {
       expect(groups[2].entries[0].url).assertEqual('https://monday.example');
     });
 
+    it('keeps a history row key stable when another row is removed', 0, () => {
+      const retained: HistoryRecord = {
+        url: 'https://retained.example',
+        title: 'Retained',
+        visitedAt: 2
+      };
+      const initial = libraryEntries(LibrarySection.HISTORY, [
+        { url: 'https://removed.example', title: 'Removed', visitedAt: 1 },
+        retained
+      ], []);
+      const afterDelete = libraryEntries(LibrarySection.HISTORY, [retained], []);
+
+      expect(libraryEntryRenderKey(initial[1])).assertEqual(libraryEntryRenderKey(afterDelete[0]));
+    });
+
+    it('updates the visible history source without disturbing retained records', 0, () => {
+      const records: HistoryRecord[] = [
+        { url: 'https://first.example', title: 'First', visitedAt: 1 },
+        { url: 'https://second.example', title: 'Second', visitedAt: 2 }
+      ];
+      const visible: HistoryRecord[] = visibleHistoryRecords(
+        records,
+        ['history-1-https://first.example']
+      );
+
+      expect(visible.length).assertEqual(1);
+      expect(visible[0].url).assertEqual('https://second.example');
+    });
+
     it('uses local delete boundaries and leaves outside history untouched', 0, () => {
       const now: number = new Date(2026, 8, 10, 12, 0, 0, 0).getTime();
       const today: HistoryRecord = {
@@ -1011,6 +1044,33 @@ export default function videoParityModelsTest() {
       expect(tabOverviewCardWidth(400)).assertEqual(178);
     });
 
+    it('keeps thumbnail previews proportional while anchoring the page crop to the top', 0, () => {
+      const crop = tabOverviewThumbnailCrop(1280, 2832, 178, 210);
+      expect(crop.scale).assertEqual(178 / 1280);
+      expect(crop.horizontalSourceOffset).assertEqual(0);
+      expect(crop.verticalSourceOffset).assertEqual(0);
+
+      const wideSource = tabOverviewThumbnailCrop(1920, 1080, 178, 210);
+      expect(wideSource.scale).assertEqual(210 / 1080);
+      expect(wideSource.horizontalSourceOffset > 0).assertTrue();
+      expect(wideSource.verticalSourceOffset).assertEqual(0);
+    });
+
+    it('uses the web page dimensions for inactive snapshots and a viewport-shaped fallback', 0, () => {
+      const pageSize = tabOverviewSnapshotSize(1280, 2832, 400, 800);
+      expect(pageSize.width).assertEqual(1280);
+      expect(pageSize.height).assertEqual(2832);
+
+      const fallback = tabOverviewSnapshotSize(Number.NaN, 0, 400, 800);
+      expect(fallback.width).assertEqual(720);
+      expect(fallback.height).assertEqual(1440);
+    });
+
+    it('keeps the thumbnail content inset aligned with the scaled live page', 0, () => {
+      expect(tabOverviewThumbnailTopOffset(0, 400)).assertEqual(0);
+      expect(tabOverviewThumbnailTopOffset(40, 400)).assertEqual(17.8);
+    });
+
     it('keeps card long-press actions aligned with the video menu', 0, () => {
       expect(TAB_CARD_MENU_LABELS.length).assertEqual(3);
       expect(TAB_CARD_MENU_LABELS[0]).assertEqual('新建标签');
@@ -1035,6 +1095,16 @@ export default function videoParityModelsTest() {
       expect(BrowserLifecycleRegistry.onBackPress()).assertTrue();
       BrowserLifecycleRegistry.clear(port);
       expect(BrowserLifecycleRegistry.onBackPress()).assertFalse();
+    });
+
+    it('forwards ability destruction to the active browser shell', 0, async () => {
+      const port: FakeBackPort = new FakeBackPort();
+      BrowserLifecycleRegistry.register(port);
+
+      await BrowserLifecycleRegistry.onDestroy();
+
+      expect(port.destroyCount).assertEqual(1);
+      BrowserLifecycleRegistry.clear(port);
     });
 
   });

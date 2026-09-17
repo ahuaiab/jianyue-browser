@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
-  AddressSecurityState,
   addressBarLabelFor,
+  AddressSecurityState,
   addressSecurityStateFor
 } from '../../../main/ets/browser/model/BrowserTypes';
 

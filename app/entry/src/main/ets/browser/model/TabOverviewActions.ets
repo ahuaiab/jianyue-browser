@@ -177,6 +177,145 @@ export function tabOverviewCardWidth(viewportWidth: number): number {
   return Math.max(1, available / TAB_OVERVIEW_LAYOUT.columns);
 }
 
+/** Height reserved by the overview toolbar below the card grid. */
+export const TAB_OVERVIEW_BOTTOM_TOOLBAR_HEIGHT: number = 60;
+
+/** Bottom padding included in the Grid content area. */
+export const TAB_OVERVIEW_GRID_BOTTOM_PADDING: number = 10;
+
+/**
+ * Return the Grid's maximum vertical scroll offset for the current viewport.
+ *
+ * The active row cannot always be moved to the first visible row: when it is
+ * near the end of the tab list, Grid stops at its content end. The live-page
+ * transform must use that same clamped offset or it will land above the card
+ * that owns its transparent shell.
+ */
+export function tabOverviewGridMaxScrollOffset(
+  tabCount: number,
+  viewportHeight: number,
+  topInset: number,
+  bottomInset: number,
+  searchProgress: number = 0
+): number {
+  if (!Number.isFinite(tabCount) || tabCount <= 0 ||
+    !Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+    return 0;
+  }
+  const rowCount: number = Math.ceil(Math.trunc(tabCount) / TAB_OVERVIEW_LAYOUT.columns);
+  const contentHeight: number = rowCount * TAB_OVERVIEW_LAYOUT.cardHeight +
+    Math.max(0, rowCount - 1) * TAB_OVERVIEW_LAYOUT.gap +
+    TAB_OVERVIEW_GRID_BOTTOM_PADDING;
+  const gridViewportHeight: number = Math.max(0,
+    viewportHeight - tabOverviewSearchSlotHeightForProgress(topInset, searchProgress) -
+    TAB_OVERVIEW_BOTTOM_TOOLBAR_HEIGHT - Math.max(0, Number.isFinite(bottomInset) ? bottomInset : 0) -
+    tabOverviewTopPaddingForProgress(topInset, searchProgress));
+  return Math.max(0, contentHeight - gridViewportHeight);
+}
+
+/**
+ * Calculate the active row's requested scroll offset, clamped to Grid's
+ * actual content range when the active tab is near the end of the list.
+ */
+export function tabOverviewActiveCardScrollOffset(
+  activeIndex: number,
+  maxScrollOffset: number = Number.POSITIVE_INFINITY
+): number {
+  if (!Number.isFinite(activeIndex) || activeIndex < 0) {
+    return 0;
+  }
+  const row: number = Math.floor(Math.trunc(activeIndex) / TAB_OVERVIEW_LAYOUT.columns);
+  const requested: number = row * (TAB_OVERVIEW_LAYOUT.cardHeight + TAB_OVERVIEW_LAYOUT.gap);
+  return Number.isFinite(maxScrollOffset)
+    ? Math.min(requested, Math.max(0, maxScrollOffset))
+    : requested;
+}
+
+/**
+ * Convert the live page's top avoid inset into the card's scaled coordinate.
+ * BrowserTransitionScene applies this inset before the page-to-card scale;
+ * static thumbnails need the same offset inside their card window.
+ */
+export function tabOverviewThumbnailTopOffset(topInset: number, viewportWidth: number): number {
+  if (!Number.isFinite(topInset) || !Number.isFinite(viewportWidth) || viewportWidth <= 0) {
+    return 0;
+  }
+  return Math.max(0, topInset) * tabOverviewCardWidth(viewportWidth) / viewportWidth;
+}
+
+/**
+ * Pixel-space crop used by every static tab preview.
+ *
+ * The mounted page is scaled to the card width and clipped from its top edge.
+ * ImageFit.Cover instead centers the crop on both axes, which makes a page
+ * appear to jump vertically when the user opens a tab from the overview.
+ */
+export interface TabOverviewThumbnailCrop {
+  scale: number;
+  horizontalSourceOffset: number;
+  verticalSourceOffset: number;
+}
+
+export function tabOverviewThumbnailCrop(
+  sourceWidth: number,
+  sourceHeight: number,
+  containerWidth: number,
+  containerHeight: number
+): TabOverviewThumbnailCrop {
+  const identity: TabOverviewThumbnailCrop = {
+    scale: 1,
+    horizontalSourceOffset: 0,
+    verticalSourceOffset: 0
+  };
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) ||
+    !Number.isFinite(containerWidth) || !Number.isFinite(containerHeight) ||
+    sourceWidth <= 0 || sourceHeight <= 0 || containerWidth <= 0 || containerHeight <= 0) {
+    return identity;
+  }
+  const scale: number = Math.max(containerWidth / sourceWidth, containerHeight / sourceHeight);
+  return {
+    scale,
+    // Preserve Cover's horizontal centering for wide pages, but deliberately
+    // anchor the vertical crop at the same top edge as BrowserTransitionScene.
+    horizontalSourceOffset: Math.max(0, (sourceWidth - containerWidth / scale) / 2),
+    verticalSourceOffset: 0
+  };
+}
+
+export interface TabOverviewSnapshotSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Normalize the dimensions supplied to ArkWeb webPageSnapshot.
+ *
+ * webPageSnapshot expects the page's own CSS pixel dimensions. Falling back
+ * to a square makes responsive pages render in a different viewport from the
+ * mounted Web component, so the fallback keeps the current viewport aspect.
+ */
+export function tabOverviewSnapshotSize(
+  pageWidth: number,
+  pageHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): TabOverviewSnapshotSize {
+  const fallbackWidth: number = 720;
+  const safeViewportWidth: number = Number.isFinite(viewportWidth) && viewportWidth > 0
+    ? viewportWidth
+    : 1;
+  const safeViewportHeight: number = Number.isFinite(viewportHeight) && viewportHeight > 0
+    ? viewportHeight
+    : 1;
+  const width: number = Number.isFinite(pageWidth) && pageWidth > 0
+    ? Math.max(1, Math.round(pageWidth))
+    : fallbackWidth;
+  const height: number = Number.isFinite(pageHeight) && pageHeight > 0
+    ? Math.max(1, Math.round(pageHeight))
+    : Math.max(1, Math.round(width * safeViewportHeight / safeViewportWidth));
+  return { width, height };
+}
+
 /** Progress of the short visual handoff from the live page to the card grid. */
 export function tabOverviewHandoffProgress(progress: number): number {
   const clampedProgress: number = clampOverviewProgress(progress);
@@ -662,7 +801,8 @@ export function tabOverviewPageFrame(
   viewportHeight: number,
   activeIndex: number,
   topInset: number,
-  searchProgress: number = 0
+  searchProgress: number = 0,
+  activeCardScrollOffset: number = 0
 ): TabOverviewPageFrame {
   const identity: TabOverviewPageFrame = {
     scaleX: 1,
@@ -693,7 +833,8 @@ export function tabOverviewPageFrame(
   const targetLeft: number = TAB_OVERVIEW_LAYOUT.horizontalPadding +
     column * (cardWidth + TAB_OVERVIEW_LAYOUT.gap);
   const targetTop: number = tabOverviewCardTopForProgress(topInset, searchProgress) +
-    row * (cardHeight + TAB_OVERVIEW_LAYOUT.gap);
+    row * (cardHeight + TAB_OVERVIEW_LAYOUT.gap) -
+    (Number.isFinite(activeCardScrollOffset) ? Math.max(0, activeCardScrollOffset) : 0);
   // Preserve the WebView's aspect ratio.  The card is intentionally shorter
   // than the page, so the page is fitted to the card width and the shared
   // clip window crops the lower part instead of vertically squeezing content.
@@ -718,7 +859,10 @@ export function tabOverviewPageFrame(
     clipTop: interpolateOverviewValue(0, targetTop, clampedProgress),
     clipWidth: interpolateOverviewValue(viewportWidth, cardWidth, clampedProgress),
     clipHeight: clipHeight,
-    cornerRadius: interpolateOverviewValue(0, TAB_OVERVIEW_LAYOUT.cardRadius, clampedProgress),
+    // The live page already has the same rounded screen surface before the
+    // overview starts. Keep that outer radius stable so the first frame does
+    // not flash from square corners into the card's rounded corners.
+    cornerRadius: TAB_OVERVIEW_LAYOUT.cardRadius,
     borderWidth: interpolateOverviewValue(0, 2, clampedProgress),
     captionOpacity: tabOverviewLiveCaptionOpacity(clampedProgress),
     captionLocalTop: captionLocalTop,

@@ -2,9 +2,9 @@ import { matrix4 } from '@kit.ArkUI';
 import {
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
-  StartPageBackgroundPosition,
   normalizeStartPageBackgroundPosition,
   normalizeStartPageBackgroundScale,
+  StartPageBackgroundPosition,
   startPageBackgroundScaleForGesture
 } from '../model/BrowserSettings';
 

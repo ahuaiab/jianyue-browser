@@ -3,20 +3,23 @@ import { uiMaterial } from '@kit.ArkUI';
 import { BrowserTabRecord, GestureSample, TabId } from '../model/BrowserTypes';
 import {
   filterTabsByQuery,
-  TAB_OVERVIEW_LAYOUT,
-  TAB_SEARCH_BAR_STYLE,
+  shouldUseTabOverviewCloseThumbnail,
   TAB_OVERVIEW_BACKGROUND_COLOR,
+  TAB_OVERVIEW_LAYOUT,
   TAB_SEARCH_BAR_BACKGROUND_COLOR,
   TAB_SEARCH_BAR_CONTENT_INSET,
-  TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
+  TAB_SEARCH_BAR_STYLE,
   TAB_SEARCH_PULL_THRESHOLD,
-  tabSearchPullProgress,
-  tabSearchVisualProgress,
-  tabOverviewSearchSlotHeightForProgress,
-  tabOverviewTopPaddingForProgress,
+  TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
+  tabOverviewBorderOwner,
   tabOverviewGridOpacityAtProgress,
-  shouldUseTabOverviewCloseThumbnail,
-  tabOverviewBorderOwner
+  tabOverviewActiveCardScrollOffset,
+  tabOverviewGridMaxScrollOffset,
+  tabOverviewSearchSlotHeightForProgress,
+  tabOverviewThumbnailTopOffset,
+  tabOverviewTopPaddingForProgress,
+  tabSearchPullProgress,
+  tabSearchVisualProgress
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
 import { TabCard } from './TabCard';
@@ -42,12 +45,17 @@ export struct TabOverview {
   @Param revision: number = 0;
   /** Top system avoid area in vp; the background remains edge-to-edge. */
   @Param topInset: number = 0;
+  @Param viewportWidth: number = 400;
+  @Param viewportHeight: number = 800;
+  @Param gridScrollOffset: number = -1;
   @Param bottomInset: number = 0;
   @Param thumbnailFor: (tabId: TabId) => image.PixelMap | undefined =
     (_tabId: TabId) => undefined;
   @Param cardProgressFor: (tabId: TabId) => number = (_tabId: TabId) => 0;
   @Param cardOffsetFor: (tabId: TabId) => number = (_tabId: TabId) => 0;
   @Param cardHorizontalOffsetFor: (tabId: TabId) => number = (_tabId: TabId) => 0;
+  /** Publishes the Grid's actual scroll offset to the mounted live page. */
+  @Param onGridScroll: (offset: number) => void = (_offset: number) => undefined;
   @Param onOpen: (tabId: TabId) => void = (_tabId: TabId) => undefined;
   @Param onNewTab: () => void = () => undefined;
   @Param onCloseAllTabs: () => void = () => undefined;
@@ -78,6 +86,7 @@ export struct TabOverview {
   @Local searchPullFinished: boolean = false;
   private searchFocusScheduled: boolean = false;
   private searchAnimationToken: number = 0;
+  private readonly gridScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     this.searchFocusScheduled = false;
@@ -87,6 +96,28 @@ export struct TabOverview {
     this.searchAnimationToken = 0;
     this.searchInputFocused = false;
     this.publishSearchProgress();
+    this.scheduleActiveCardScroll();
+  }
+
+  @Monitor('activeTabId')
+  private onActiveTabChanged(): void {
+    this.scheduleActiveCardScroll();
+  }
+
+  @Monitor('revision')
+  private onOverviewRevisionChanged(): void {
+    // Snapshot publication invalidates the Grid subtree. Re-apply the same
+    // bounded offset so a late thumbnail update cannot return the active row
+    // to the top while the live page still uses the settled card slot.
+    this.scheduleActiveCardScroll(this.gridScrollOffset);
+  }
+
+  @Monitor('viewportHeight')
+  private onOverviewViewportChanged(): void {
+    // The IME and avoid-area changes can resize the Grid without producing a
+    // scroll callback. Re-read the Scroller after layout so the live page
+    // follows the same effective offset as the cards.
+    setTimeout(() => this.publishGridScrollOffset(), 0);
   }
 
   private requestSearchFocus(): void {
@@ -214,6 +245,55 @@ export struct TabOverview {
     this.onSearchProgress(this.searchProgress());
   }
 
+  private publishGridScrollOffset(): void {
+    try {
+      const currentOffset = this.gridScroller.currentOffset();
+      const yOffset: number = currentOffset.yOffset;
+      if (Number.isFinite(yOffset)) {
+        this.onGridScroll(Math.max(0, yOffset));
+      }
+    } catch (_error) {
+      // The Scroller is not bound during the first conditional-mount frame.
+      // The Grid callback and the next viewport frame will publish it again.
+    }
+  }
+
+  private scheduleActiveCardScroll(preferredOffset: number = Number.NaN): void {
+    // Grid is virtualized. Its first layout can happen after the overview
+    // component appears, so retry across the opening frames. Every call is a
+    // non-animated seek and therefore cannot introduce a second visual motion.
+    const retryDelays: number[] = [0, 80, 180, 360];
+    for (const delay of retryDelays) {
+      setTimeout(() => {
+        const activeIndex: number = this.indexFor(this.activeTabId);
+        if (activeIndex < 0) {
+          return;
+        }
+        try {
+          let targetOffset: number = preferredOffset;
+          if (!Number.isFinite(targetOffset) || targetOffset < 0) {
+            const maxScrollOffset: number = tabOverviewGridMaxScrollOffset(
+              this.visibleTabs().length,
+              this.viewportHeight,
+              this.topInset,
+              this.bottomInset,
+              this.searchProgress()
+            );
+            targetOffset = tabOverviewActiveCardScrollOffset(activeIndex, maxScrollOffset);
+          }
+          this.gridScroller.scrollTo({
+            xOffset: 0,
+            yOffset: Math.max(0, targetOffset)
+          });
+          setTimeout(() => this.publishGridScrollOffset(), 0);
+        } catch (_error) {
+          // The grid may be between conditional mount and layout. A later
+          // retry handles that transient state without affecting the gesture.
+        }
+      }, delay);
+    }
+  }
+
   private indexFor(tabId: TabId): number {
     return this.tabs.findIndex((tab: BrowserTabRecord) => tab.id === tabId);
   }
@@ -292,6 +372,7 @@ export struct TabOverview {
           !this.cardUsesCloseThumbnail(tab) &&
           tabOverviewBorderOwner(this.overviewProgress, this.overviewClosing) === 'card',
         thumbnail: this.thumbnailFor(tab.id),
+        thumbnailTopOffset: tabOverviewThumbnailTopOffset(this.topInset, this.viewportWidth),
         closeProgress: this.cardProgressFor(tab.id),
         verticalOffset: this.cardOffsetFor(tab.id),
         horizontalOffset: this.cardHorizontalOffsetFor(tab.id),
@@ -331,7 +412,7 @@ export struct TabOverview {
       Blank()
         .height(this.gridTopPadding())
         .width('100%');
-      Grid() {
+      Grid(this.gridScroller) {
         ForEach(this.visibleTabs(), (tab: BrowserTabRecord) => {
           this.buildCard(tab);
         }, (tab: BrowserTabRecord) => tab.id);
@@ -346,8 +427,9 @@ export struct TabOverview {
           top: 0,
           bottom: 10
         })
-        .layoutWeight(1)
-        .width('100%')
+      .layoutWeight(1)
+      .width('100%')
+      .onDidScroll(() => this.publishGridScrollOffset())
       .parallelGesture(
           PanGesture({ direction: PanDirection.Vertical })
             .onActionStart(() => this.beginSearchPull())

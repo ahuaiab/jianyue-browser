@@ -2,8 +2,8 @@ import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 import {
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
-  StartPageBackgroundPosition,
-  normalizeStartPageBackgroundScale
+  normalizeStartPageBackgroundScale,
+  StartPageBackgroundPosition
 } from '../model/BrowserSettings';
 import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_SHEET } from '../model/BrowserVisualMetrics';
 

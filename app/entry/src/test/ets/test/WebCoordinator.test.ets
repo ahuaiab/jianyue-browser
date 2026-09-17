@@ -3,8 +3,8 @@ import {
   BrowserDownloadRequest,
   DownloadCoordinator,
   DownloadStartPort,
-  SavePickerPort,
-  sanitizeDownloadFileName
+  sanitizeDownloadFileName,
+  SavePickerPort
 } from '../../../main/ets/browser/web/DownloadCoordinator';
 import {
   PermissionDecision,

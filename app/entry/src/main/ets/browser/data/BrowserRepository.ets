@@ -13,11 +13,7 @@ import {
   DEFAULT_BROWSER_SETTINGS,
   normalizeBrowserSettings
 } from '../model/BrowserSettings';
-import {
-  StartPageItem,
-  sortStartPageItems,
-  validStartPageItem
-} from '../model/StartPageModels';
+import { sortStartPageItems, StartPageItem, validStartPageItem } from '../model/StartPageModels';
 import { ClosedTabRecord } from './ClosedTabStack';
 import { KeyValueStore } from './KeyValueStore';
 
@@ -35,6 +31,7 @@ const MAX_CLOSED_TABS: number = 20;
 export class BrowserRepository {
   private readonly store: KeyValueStore;
   private sessionOperation: Promise<void> = Promise.resolve();
+  private historyOperation: Promise<void> = Promise.resolve();
 
   constructor(store: KeyValueStore) {
     this.store = store;
@@ -96,19 +93,28 @@ export class BrowserRepository {
     return next;
   }
 
+  /** Serialize history read-modify-write operations so deletion cannot be overwritten by a visit. */
+  private enqueueHistoryOperation(operation: () => Promise<void>): Promise<void> {
+    const next: Promise<void> = this.historyOperation.then(operation, operation);
+    this.historyOperation = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
   async recordHistory(record: HistoryRecord, isPrivate: boolean): Promise<void> {
     if (isPrivate || !this.validHistory(record)) {
       return;
     }
-    const history: HistoryRecord[] = await this.listHistory();
-    const latest: HistoryRecord | undefined = history[0];
-    if (latest !== undefined && latest.url === record.url) {
-      history[0] = this.copyHistory(record);
-    } else {
-      history.unshift(this.copyHistory(record));
-    }
-    const bounded: HistoryRecord[] = history.slice(0, MAX_HISTORY);
-    await this.writeJson(HISTORY_KEY, bounded);
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      const latest: HistoryRecord | undefined = history[0];
+      if (latest !== undefined && latest.url === record.url) {
+        history[0] = this.copyHistory(record);
+      } else {
+        history.unshift(this.copyHistory(record));
+      }
+      const bounded: HistoryRecord[] = history.slice(0, MAX_HISTORY);
+      await this.writeJson(HISTORY_KEY, bounded);
+    });
   }
 
   async listHistory(): Promise<HistoryRecord[]> {
@@ -132,22 +138,49 @@ export class BrowserRepository {
     if (target.length === 0) {
       return;
     }
-    const history: HistoryRecord[] = await this.listHistory();
-    const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.url !== target);
-    if (remaining.length !== history.length) {
-      await this.writeJson(HISTORY_KEY, remaining);
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.url !== target);
+      if (remaining.length !== history.length) {
+        await this.writeJson(HISTORY_KEY, remaining);
+      }
+    });
+  }
+
+  /** Remove exactly the history row selected by the library UI. */
+  async removeHistoryEntry(record: HistoryRecord): Promise<void> {
+    if (!this.validHistory(record)) {
+      return;
     }
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      let removed: boolean = false;
+      const remaining: HistoryRecord[] = history.filter((candidate: HistoryRecord) => {
+        const matches: boolean = !removed && candidate.url === record.url &&
+          candidate.visitedAt === record.visitedAt;
+        if (matches) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+      if (removed) {
+        await this.writeJson(HISTORY_KEY, remaining);
+      }
+    });
   }
 
   async removeHistoryBefore(cutoff: number): Promise<void> {
     if (!Number.isFinite(cutoff)) {
       return;
     }
-    const history: HistoryRecord[] = await this.listHistory();
-    const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.visitedAt >= cutoff);
-    if (remaining.length !== history.length) {
-      await this.writeJson(HISTORY_KEY, remaining);
-    }
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.visitedAt >= cutoff);
+      if (remaining.length !== history.length) {
+        await this.writeJson(HISTORY_KEY, remaining);
+      }
+    });
   }
 
   /** Removes records at or after a local-calendar cutoff, used by batch menus. */
@@ -155,18 +188,22 @@ export class BrowserRepository {
     if (!Number.isFinite(cutoff)) {
       return;
     }
-    const history: HistoryRecord[] = await this.listHistory();
-    const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.visitedAt < cutoff);
-    if (remaining.length !== history.length) {
-      await this.writeJson(HISTORY_KEY, remaining);
-    }
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      const remaining: HistoryRecord[] = history.filter((record: HistoryRecord) => record.visitedAt < cutoff);
+      if (remaining.length !== history.length) {
+        await this.writeJson(HISTORY_KEY, remaining);
+      }
+    });
   }
 
   async clearHistory(): Promise<void> {
-    const history: HistoryRecord[] = await this.listHistory();
-    if (history.length > 0) {
-      await this.writeJson(HISTORY_KEY, []);
-    }
+    await this.enqueueHistoryOperation(async (): Promise<void> => {
+      const history: HistoryRecord[] = await this.listHistory();
+      if (history.length > 0) {
+        await this.writeJson(HISTORY_KEY, []);
+      }
+    });
   }
 
   async addBookmark(record: BookmarkRecord, isPrivate: boolean = false): Promise<void> {

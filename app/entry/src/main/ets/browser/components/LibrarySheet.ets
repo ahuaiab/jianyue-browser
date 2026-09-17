@@ -1,21 +1,22 @@
 import {
-  LibraryEntry,
-  LibrarySection,
+  filterLibraryEntries,
   HistoryDeleteRange,
   HistoryTimelineGroup,
-  filterLibraryEntries,
   historyTimelineGroups,
-  librarySectionAfterSwipe,
-  libraryEntries,
-  librarySectionChrome,
-  librarySectionBackground,
-  libraryDismissProgress,
-  libraryDismissShouldClose,
   LIBRARY_DISMISS_THRESHOLD,
   LIBRARY_SEARCH_PULL_THRESHOLD,
   LIBRARY_SEARCH_REVEAL_ANIMATION_DURATION_MS,
   LIBRARY_SHEET_HEIGHT_PERCENT,
-  librarySearchPullProgress
+  libraryDismissProgress,
+  libraryDismissShouldClose,
+  libraryEntries,
+  LibraryEntry,
+  librarySearchPullProgress,
+  LibrarySection,
+  librarySectionAfterSwipe,
+  librarySectionBackground,
+  librarySectionChrome,
+  visibleHistoryRecords
 } from '../model/LibraryModels';
 import { BookmarkRecord, HistoryRecord } from '../model/BrowserTypes';
 import { curves, uiMaterial } from '@kit.ArkUI';
@@ -39,6 +40,8 @@ import {
 @ComponentV2
 export struct LibrarySheet {
   @Param history: HistoryRecord[] = [];
+  /** Explicit invalidation token for async history changes in the parent shell. */
+  @Param historyRevision: number = 0;
   @Param bookmarks: BookmarkRecord[] = [];
   /** System top avoid area in vp; the sheet keeps a visual breathing gap below it. */
   @Param topInset: number = 0;
@@ -46,7 +49,7 @@ export struct LibrarySheet {
   @Param bottomInset: number = 0;
   @Param onOpen: (url: string) => void = (_url: string) => undefined;
   @Param onRemoveBookmark: (url: string) => void = (_url: string) => undefined;
-  @Param onRemoveHistory: (url: string) => void = (_url: string) => undefined;
+  @Param onRemoveHistory: (entry: LibraryEntry) => void = (_entry: LibraryEntry) => undefined;
   @Param onDeleteHistoryRange: (range: HistoryDeleteRange) => void =
     (_range: HistoryDeleteRange) => undefined;
   @Param onClose: () => void = () => undefined;
@@ -69,10 +72,80 @@ export struct LibrarySheet {
   @Local editMenuShown: boolean = false;
   @Local editLongPressActive: boolean = false;
   @Local suppressEditClick: boolean = false;
+  @Local hiddenHistoryEntryIds: string[] = [];
+  @Local visibleHistoryItems: string[] = [];
+  private historyRenderEntries: Map<string, LibraryEntry> = new Map();
+  private historyRenderTitles: Map<string, string> = new Map();
   private sectionSwitchDirection: number = 1;
   private sectionAnimationToken: number = 0;
   private sheetAnimationToken: number = 0;
   private searchAnimationToken: number = 0;
+
+  aboutToAppear(): void {
+    this.syncVisibleHistoryGroups();
+  }
+
+  @Monitor('historyRevision')
+  private onHistoryRevisionChanged(): void {
+    this.syncVisibleHistoryGroups();
+  }
+
+  @Monitor('searchQuery')
+  private onHistorySearchChanged(): void {
+    this.syncVisibleHistoryGroups();
+  }
+
+  private syncVisibleHistoryGroups(): void {
+    const visibleRecords: HistoryRecord[] = visibleHistoryRecords(
+      this.history,
+      this.hiddenHistoryEntryIds
+    );
+    const groups: HistoryTimelineGroup[] = historyTimelineGroups(visibleRecords, Date.now())
+      .map((group: HistoryTimelineGroup): HistoryTimelineGroup => ({
+        section: group.section,
+        title: group.title,
+        entries: filterLibraryEntries(group.entries, this.searchQuery)
+      }))
+      .filter((group: HistoryTimelineGroup) => group.entries.length > 0);
+    const renderItems: string[] = [];
+    const renderEntries: Map<string, LibraryEntry> = new Map();
+    const renderTitles: Map<string, string> = new Map();
+    groups.forEach((group: HistoryTimelineGroup) => {
+      const headingKey: string = `history-heading-${group.section}`;
+      renderItems.push(headingKey);
+      renderTitles.set(headingKey, group.title);
+      group.entries.forEach((entry: LibraryEntry) => {
+        renderItems.push(entry.id);
+        renderEntries.set(entry.id, entry);
+      });
+    });
+    this.historyRenderEntries = renderEntries;
+    this.historyRenderTitles = renderTitles;
+    this.visibleHistoryItems = renderItems;
+  }
+
+  private historyRenderTitle(key: string): string {
+    return this.historyRenderTitles.get(key) ?? '';
+  }
+
+  private historyRenderEntry(key: string): LibraryEntry {
+    return this.historyRenderEntries.get(key) ?? {
+      id: key,
+      section: LibrarySection.HISTORY,
+      title: '',
+      url: '',
+      timestamp: 0
+    };
+  }
+
+  @Builder
+  private historyRenderItem(key: string) {
+    if (key.indexOf('history-heading-') === 0) {
+      this.timelineHeading(this.historyRenderTitle(key));
+    } else {
+      this.entryRow(this.historyRenderEntry(key));
+    }
+  }
 
   private sectionTitle(section: LibrarySection): string {
     return librarySectionChrome(section).title;
@@ -325,22 +398,15 @@ export struct LibrarySheet {
     return filterLibraryEntries(this.entries(), this.searchQuery);
   }
 
-  private historyGroups(): HistoryTimelineGroup[] {
-    const groups: HistoryTimelineGroup[] = historyTimelineGroups(this.history, Date.now());
-    return groups
-      .map((group: HistoryTimelineGroup): HistoryTimelineGroup => ({
-        section: group.section,
-        title: group.title,
-        entries: filterLibraryEntries(group.entries, this.searchQuery)
-      }))
-      .filter((group: HistoryTimelineGroup) => group.entries.length > 0);
-  }
-
   private removeEntry(entry: LibraryEntry): void {
     if (entry.section === LibrarySection.BOOKMARKS) {
       this.onRemoveBookmark(entry.url);
     } else {
-      this.onRemoveHistory(entry.url);
+      if (this.hiddenHistoryEntryIds.indexOf(entry.id) < 0) {
+        this.hiddenHistoryEntryIds = [...this.hiddenHistoryEntryIds, entry.id];
+        this.syncVisibleHistoryGroups();
+      }
+      this.onRemoveHistory(entry);
     }
   }
 
@@ -450,7 +516,7 @@ export struct LibrarySheet {
       MenuItem({ content: '删除' })
         .onChange((selected: boolean) => {
           if (selected) {
-            this.onRemoveHistory(entry.url);
+            this.removeEntry(entry);
             this.dismissEntryMenu(entry.id);
           }
         })
@@ -657,15 +723,11 @@ export struct LibrarySheet {
   private listContent() {
     Scroll() {
       Column() {
-        ForEach(this.historyGroups(), (group: HistoryTimelineGroup) => {
-          Column() {
-            this.timelineHeading(group.title);
-            ForEach(group.entries, (entry: LibraryEntry) => {
-              this.entryRow(entry);
-            }, (entry: LibraryEntry) => entry.id);
-          }
-            .width('100%');
-        }, (group: HistoryTimelineGroup) => group.section);
+        Repeat<string>(this.visibleHistoryItems)
+          .each((item: RepeatItem<string>) => {
+            this.historyRenderItem(item.item);
+          })
+          .key((item: string) => item);
       }
         .width('100%')
         .height('100%')
@@ -683,7 +745,7 @@ export struct LibrarySheet {
   private content() {
     if (this.section === LibrarySection.BOOKMARKS) {
       this.bookmarkContent();
-    } else if (this.historyGroups().length === 0) {
+    } else if (this.visibleHistoryItems.length === 0) {
       this.emptyState();
     } else {
       this.listContent();

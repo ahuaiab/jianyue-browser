@@ -1,9 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  bookmarkRecordForPage,
   BrowserSharePayload,
   BrowserTabRecord,
-  TabResidency,
-  bookmarkRecordForPage,
   committedUrlForTabState,
   displayUrlFor,
   loadableUrlFor,
@@ -11,6 +10,7 @@ import {
   sharePayloadForTab,
   shareUnavailableMessageForTab,
   tabOverviewTitleFor,
+  TabResidency,
   urlSchemeFor,
   validateBrowserUrl
 } from '../../../main/ets/browser/model/BrowserTypes';

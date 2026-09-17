@@ -1,15 +1,6 @@
-import {
-  GestureAxis,
-  GestureDecision,
-  GestureOutcome,
-  GestureSample
-} from '../model/BrowserTypes';
+import { GestureAxis, GestureDecision, GestureOutcome, GestureSample } from '../model/BrowserTypes';
 import { DEFAULT_GESTURE_PROFILE, GestureProfile } from './GestureProfile';
-import {
-  shouldCommitProjectedSwitch,
-  shouldCommitNewTabPull,
-  rubberBandDistance
-} from '../model/TabGestureMotion';
+import { rubberBandDistance, shouldCommitNewTabPull, shouldCommitProjectedSwitch } from '../model/TabGestureMotion';
 
 export class GestureDecisionEngine {
   private axis: GestureAxis = GestureAxis.UNDECIDED;

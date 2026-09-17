@@ -1,6 +1,5 @@
 import {
-  newTabBackgroundProgressForPullProgress,
-  TabPreviewKind
+  newTabBackgroundProgressForPullProgress, TabPreviewKind
 } from './TabGestureMotion';
 
 export interface SafariTransitionFrame {
@@ -32,6 +31,7 @@ export interface NewTabHandoffVisual {
   plusScale: number;
   placeholderScale: number;
   placeholderSlideProgress: number;
+  placeholderTextAlignment: 'start' | 'center';
 }
 
 export interface TabTransitionSceneVisualState {
@@ -132,6 +132,19 @@ export function addressItemLeft(index: number, activeIndex: number, itemWidth: n
   const capsuleWidth: number = Math.max(1, finite(itemWidth));
   return (width - capsuleWidth) / 2 + addressOffsetForIndex(index, activeIndex,
     capsuleWidth + gap, dragX, width);
+}
+
+/**
+ * Keep a reserved new-tab capsule on its original visual slot while the
+ * draft is inserted into the committed tab list. Before insertion the draft
+ * lives at the end of the list; afterwards its stable id identifies that
+ * same index. Using `tabs.length` after insertion would add one stride and
+ * cause the capsule to jump for a render frame.
+ */
+export function pendingTabVisualIndex(pendingTabId: string, tabIds: string[]): number {
+  const normalizedId: string = pendingTabId.trim();
+  const committedIndex: number = normalizedId.length === 0 ? -1 : tabIds.indexOf(normalizedId);
+  return committedIndex >= 0 ? committedIndex : tabIds.length;
 }
 
 /** A final tab can prepare its render-only neighbour before pointer motion. */
@@ -236,7 +249,8 @@ export function newTabHandoffVisual(progress: number): NewTabHandoffVisual {
     placeholderOpacity: placeholderProgress,
     plusScale: 1,
     placeholderScale: 1,
-    placeholderSlideProgress: 1
+    placeholderSlideProgress: 1,
+    placeholderTextAlignment: 'center'
   };
 }
 

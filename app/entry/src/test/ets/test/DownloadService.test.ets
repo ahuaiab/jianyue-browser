@@ -1,12 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { Context } from '@kit.AbilityKit';
 import { webview } from '@kit.ArkWeb';
-import { DownloadStore, DownloadRecordStorage } from '../../../main/ets/browser/data/DownloadStore';
-import {
-  DownloadBackend,
-  DownloadStatus,
-  DownloadTaskRecord
-} from '../../../main/ets/browser/model/DownloadModels';
+import { DownloadRecordStorage, DownloadStore } from '../../../main/ets/browser/data/DownloadStore';
+import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from '../../../main/ets/browser/model/DownloadModels';
 import {
   AgentDownloadConfig,
   AgentDownloadPort,

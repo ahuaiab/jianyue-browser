@@ -160,6 +160,62 @@ export default function browserRepositoryTest() {
       expect(bounded[0].url).assertEqual('https://host-2000.example');
     });
 
+    it('removes only the selected history record when a URL appears again later', 0, async () => {
+      const repository: BrowserRepository = new BrowserRepository(new FakeKeyValueStore());
+      const first: HistoryRecord = {
+        url: 'https://repeat.example',
+        title: 'First visit',
+        visitedAt: 1
+      };
+      const middle: HistoryRecord = {
+        url: 'https://middle.example',
+        title: 'Middle visit',
+        visitedAt: 2
+      };
+      const second: HistoryRecord = {
+        url: 'https://repeat.example',
+        title: 'Second visit',
+        visitedAt: 3
+      };
+      await repository.recordHistory(first, false);
+      await repository.recordHistory(middle, false);
+      await repository.recordHistory(second, false);
+
+      await repository.removeHistoryEntry({
+        url: first.url,
+        title: 'Updated display title',
+        visitedAt: first.visitedAt
+      });
+
+      const history: HistoryRecord[] = await repository.listHistory();
+      expect(history.length).assertEqual(2);
+      expect(history.some((record: HistoryRecord) => record.title === 'First visit')).assertFalse();
+      expect(history.some((record: HistoryRecord) => record.title === 'Second visit')).assertTrue();
+      expect(history.some((record: HistoryRecord) => record.title === 'Middle visit')).assertTrue();
+    });
+
+    it('serializes history recording after an in-flight single-record deletion', 0, async () => {
+      const repository: BrowserRepository = new BrowserRepository(new FakeKeyValueStore());
+      const oldRecord: HistoryRecord = {
+        url: 'https://old.example',
+        title: 'Old',
+        visitedAt: 1
+      };
+      await repository.recordHistory(oldRecord, false);
+
+      const removePromise: Promise<void> = repository.removeHistoryEntry(oldRecord);
+      const recordPromise: Promise<void> = repository.recordHistory({
+        url: 'https://new.example',
+        title: 'New',
+        visitedAt: 2
+      }, false);
+      await Promise.all([removePromise, recordPromise]);
+
+      const history: HistoryRecord[] = await repository.listHistory();
+      expect(history.length).assertEqual(1);
+      expect(history[0].url).assertEqual('https://new.example');
+    });
+
     it('deletes history before, from, and across an empty collection idempotently', 0, async () => {
       const store: FakeKeyValueStore = new FakeKeyValueStore();
       const repository: BrowserRepository = new BrowserRepository(store);

@@ -3,9 +3,9 @@ import { TabId } from '../../../main/ets/browser/model/BrowserTypes';
 import { TabStore } from '../../../main/ets/browser/store/TabStore';
 import {
   DefaultBrowserCommandDispatcher,
+  SessionPort,
   SnapshotPort,
-  TabRuntimePort,
-  SessionPort
+  TabRuntimePort
 } from '../../../main/ets/browser/command/BrowserCommandDispatcher';
 
 class FakeRuntimePort implements TabRuntimePort {

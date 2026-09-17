@@ -1,5 +1,5 @@
 import { webview } from '@kit.ArkWeb';
-import { AnimatorResult, UIContext, curves } from '@kit.ArkUI';
+import { AnimatorResult, curves, UIContext } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -21,19 +21,19 @@ import { BrowserTransitionScene } from './BrowserTransitionScene';
 import { TabOverview } from './TabOverview';
 import {
   DefaultBrowserCommandDispatcher,
-  TabSnapshotCachePort,
   SessionPort,
-  TabRuntimePort
+  TabRuntimePort,
+  TabSnapshotCachePort
 } from '../command/BrowserCommandDispatcher';
 import { GestureDecisionEngine } from '../gesture/GestureDecisionEngine';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
 import {
   ArkWebRuntimeFactory,
   ArkWebRuntimeHandle,
-  WebNodeHostController,
-  WebPageLifecycleObserver,
   WebDownloadObserver,
   WebLoadError,
+  WebNodeHostController,
+  WebPageLifecycleObserver,
   WebSslError
 } from '../web/WebTabNode';
 import { WebTabPool } from '../web/WebTabPool';
@@ -43,108 +43,110 @@ import { BrowserRepository } from '../data/BrowserRepository';
 import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
 import { KeyValueStore, MemoryKeyValueStore, PreferencesKeyValueStore } from '../data/KeyValueStore';
 import { BrowserLifecyclePort, BrowserLifecycleRegistry } from '../lifecycle/BrowserLifecyclePort';
+import { DownloadProgressSnapshot, DownloadStatus, DownloadTaskRecord } from '../model/DownloadModels';
+import { desktopUserAgentFor, PageAction } from '../model/PageActions';
 import {
-  DownloadProgressSnapshot,
-  DownloadStatus,
-  DownloadTaskRecord
-} from '../model/DownloadModels';
-import { PageAction, desktopUserAgentFor } from '../model/PageActions';
-import {
-  HistoryDeleteRange,
   historyDeleteCutoff,
+  HistoryDeleteRange,
+  LibraryEntry,
   libraryBookmarkActionEnabled
 } from '../model/LibraryModels';
 import {
-  BrowserSettings,
   AutoCloseTabsPolicy,
   BrowserSearchEngine,
+  BrowserSettings,
   copyBrowserSettings,
   DEFAULT_BROWSER_SETTINGS,
   DEFAULT_START_PAGE_BACKGROUND_POSITION,
   DEFAULT_START_PAGE_BACKGROUND_SCALE,
   normalizeStartPageBackgroundPosition,
   normalizeStartPageBackgroundScale,
-  StartPageBackgroundPosition,
-  StartPageAppearance
+  StartPageAppearance,
+  StartPageBackgroundPosition
 } from '../model/BrowserSettings';
-import { ClosedTabStack, closedTabFromRecord } from '../data/ClosedTabStack';
+import { closedTabFromRecord, ClosedTabStack } from '../data/ClosedTabStack';
 import {
-  PageDisplayState,
+  copyPageDisplayState,
   DEFAULT_PAGE_DISPLAY_STATE,
-  PageFontSize,
-  copyPageDisplayState
+  PageDisplayState,
+  PageFontSize
 } from '../model/PageDisplayState';
 import {
+  copyStartPageItem,
   StartPageItem,
   StartPageItemType,
-  copyStartPageItem,
   startPageThumbnailMatchesBackground
 } from '../model/StartPageModels';
 import {
-  TAB_OVERVIEW_GESTURE_CARD_HEIGHT,
-  tabOverviewCardWidth,
-  tabOverviewPageFrame,
-  tabOverviewChromeFrame,
-  TabOverviewChromeFrame,
-  TabOverviewPageFrame,
-  tabOverviewSpringEasing,
-  tabOverviewBorderOwner,
-  tabOverviewCaptionHandoffOpacity,
-  shouldUseTabOverviewCloseThumbnail,
-  shouldMountBottomBrowserBar,
   shouldMountAddressTransitionLayer,
+  shouldMountBottomBrowserBar,
+  shouldUseTabOverviewCloseThumbnail,
+  TAB_OVERVIEW_GESTURE_CARD_HEIGHT,
+  tabOverviewActiveCardScrollOffset,
   tabOverviewAddressLayerZIndex,
+  tabOverviewBorderOwner,
   tabOverviewBottomChromeZIndex,
+  tabOverviewCaptionHandoffOpacity,
+  tabOverviewCardWidth,
+  tabOverviewChromeFrame,
+  tabOverviewGridMaxScrollOffset,
+  TabOverviewChromeFrame,
+  tabOverviewPageFrame,
+  TabOverviewPageFrame,
+  tabOverviewSnapshotSize,
+  TabOverviewSnapshotSize,
+  tabOverviewSpringEasing,
 } from '../model/TabOverviewActions';
 import {
-  visibleContentHeight,
-  topContentInsetFromAvoidRects
+  availableContentHeight,
+  topContentInsetFromAvoidRects,
+  visibleContentHeight
 } from '../model/WindowAvoidance';
 import {
   BROWSER_MODAL_Z_INDEX,
   BROWSER_OVERVIEW_ANIMATION_DURATION_MS,
   BROWSER_OVERVIEW_TRANSITION_DURATION_MS,
   HARMONY_RADIUS_CARD,
-  SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS,
   SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS,
+  SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
   SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
   safariAddressItemWidth,
-  START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
-  START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP
+  START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP,
+  START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE
 } from '../model/BrowserVisualMetrics';
 import {
-  AddressBarPresentationMode,
   addressBarPresentationForInput,
+  AddressBarPresentationMode,
   addressEditorDraftFor,
-  resetBrowserGestureState,
+  addressInputIdentity,
+  BrowserGestureState,
+  canStartAddressStripGesture,
+  closedAddressEditorState,
   committedNavigationUrl,
+  isAddressTransitionCurrent,
+  isOverviewSettled,
+  resetBrowserGestureState,
   shouldActivateWebController,
+  shouldDismissOverviewBeforeCreatingTab,
+  shouldMountTabWebHost,
   shouldRecoverMissingTabController,
   shouldRecreateBlankTabRuntime,
-  shouldRetryTabSnapshot,
-  shouldWaitForTabOverviewSnapshot,
-  shouldDismissOverviewBeforeCreatingTab,
-  shouldWaitForOverviewClose,
-  isOverviewSettled,
-  shouldMountTabWebHost,
   shouldRefreshHostsForViewport,
-  isAddressTransitionCurrent,
-  addressInputIdentity,
-  closedAddressEditorState,
-  canStartAddressStripGesture,
-  BrowserGestureState
+  shouldRetryTabSnapshot,
+  shouldWaitForOverviewClose,
+  shouldWaitForTabOverviewSnapshot
 } from '../model/BrowserInteraction';
 import {
-  TabGestureMotionState,
-  tabGestureMotion,
   emptyTabGestureMotion,
+  tabGestureMotion,
+  TabGestureMotionState,
   tabGestureOffsetForRender,
-  verticalOverviewGestureMotion,
+  TabGestureState,
   TabPreviewKind,
-  TabGestureState
+  verticalOverviewGestureMotion
 } from '../model/TabGestureMotion';
 import {
   safariTransitionFrame,
@@ -154,39 +156,37 @@ import {
 import { TouchOwner } from '../gesture/TouchOwnership';
 import {
   AddressBarSource,
+  BookmarkRecord,
+  bookmarkRecordForPage,
   BrowserErrorKind,
   BrowserErrorState,
-  BrowserSharePayload,
   BrowserSessionSnapshot,
+  BrowserSharePayload,
   BrowserTabRecord,
-  PendingTabDraft,
-  BookmarkRecord,
+  displayUrlFor,
   GestureAxis,
   GestureDecision,
   GestureOutcome,
   GestureSample,
   HistoryRecord,
-  TabDirection,
-  TabId,
-  displayUrlFor,
   lastValidUrlForTab,
-  validateBrowserUrl,
   loadableUrlFor,
   normalizeAddressInput,
+  PendingTabDraft,
   searchQueryForUrl,
   searchQueryTextFor,
   sharePayloadForTab,
   shareUnavailableMessageForTab,
+  TabDirection,
+  TabId,
   tabOverviewTitleFor,
-  bookmarkRecordForPage
+  validateBrowserUrl
 } from '../model/BrowserTypes';
 import { TabStore } from '../store/TabStore';
 import { DownloadNotificationGateway } from '../web/DownloadNotificationGateway';
 import { DownloadService, WebCookiePort } from '../web/DownloadService';
 import { RequestAgentGateway } from '../web/RequestAgentGateway';
-import {
-  takePendingExternalUrl
-} from '../model/BrowserLaunchState';
+import { takePendingExternalUrl } from '../model/BrowserLaunchState';
 
 const ENABLE_GESTURE_LAB: boolean = false;
 const BROWSER_WEB_DOMAIN: number = 0x0000;
@@ -587,6 +587,7 @@ class RepositorySessionPort implements SessionPort {
 class ShellLifecyclePort implements BrowserLifecyclePort {
   private readonly foregroundCallback: () => void;
   private readonly backgroundCallback: () => Promise<void>;
+  private readonly destroyCallback: () => Promise<void>;
   private readonly windowStageDestroyCallback: () => Promise<void>;
   private readonly memoryCallback: (level: number) => void;
   private readonly backCallback: () => boolean;
@@ -595,6 +596,7 @@ class ShellLifecyclePort implements BrowserLifecyclePort {
   constructor(
     foregroundCallback: () => void,
     backgroundCallback: () => Promise<void>,
+    destroyCallback: () => Promise<void>,
     windowStageDestroyCallback: () => Promise<void>,
     memoryCallback: (level: number) => void,
     backCallback: () => boolean,
@@ -602,6 +604,7 @@ class ShellLifecyclePort implements BrowserLifecyclePort {
   ) {
     this.foregroundCallback = foregroundCallback;
     this.backgroundCallback = backgroundCallback;
+    this.destroyCallback = destroyCallback;
     this.windowStageDestroyCallback = windowStageDestroyCallback;
     this.memoryCallback = memoryCallback;
     this.backCallback = backCallback;
@@ -614,6 +617,10 @@ class ShellLifecyclePort implements BrowserLifecyclePort {
 
   async onBackground(): Promise<void> {
     await this.backgroundCallback();
+  }
+
+  async onDestroy(): Promise<void> {
+    await this.destroyCallback();
   }
 
   async onWindowStageDestroy(): Promise<void> {
@@ -640,6 +647,10 @@ export struct BrowserShell {
   // page's overview card. Keeping it in the shell prevents the WebView frame
   // from retaining the hidden-search target while the grid moves down.
   @Local overviewSearchProgress: number = 0;
+  // The live page and the Grid share this measured scroll track. A fixed
+  // active-row offset is only valid at overview entry; after the user scrolls
+  // vertically, the selected card must carry the mounted page with it.
+  @Local overviewGridScrollOffset: number = -1;
   // During card selection the live page must paint above the overview shell so
   // its blue outline and reverse expansion cannot be covered by the cards.
   @Local overviewClosing: boolean = false;
@@ -722,7 +733,10 @@ export struct BrowserShell {
   };
   @Local startPageItems: StartPageItem[] = [];
   @Local historyItems: HistoryRecord[] = [];
+  @Local historyRevision: number = 0;
   @Local bookmarkItems: BookmarkRecord[] = [];
+  private historySuppressedTabId: TabId = '';
+  private historySuppressedUrl: string = '';
   @Local pageDisplayState: PageDisplayState = {
     fontSize: PageFontSize.STANDARD,
     fullScreen: false
@@ -1126,6 +1140,7 @@ export struct BrowserShell {
     this.lifecyclePort = new ShellLifecyclePort(
       () => this.handleForeground(),
       () => this.handleBackground(),
+      () => this.closeTabsForBrowserExit(),
       () => this.closeTabsForBrowserExit(),
       (level: number) => this.handleMemoryPressure(level),
       () => this.onSystemBackPress(),
@@ -2269,6 +2284,7 @@ export struct BrowserShell {
     this.browserSettings = await this.repository?.loadSettings() ?? copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
     this.startPageItems = await this.repository?.listStartPageItems() ?? [];
     this.historyItems = await this.repository?.listHistory() ?? [];
+    this.bumpHistoryRevision();
     this.syncFrequentSites(this.historyItems);
     const closedTabs = await this.repository?.loadClosedTabs() ?? [];
     closedTabs.forEach((record) => this.closedTabStack.push(record));
@@ -2552,6 +2568,7 @@ export struct BrowserShell {
     reason: string = 'address-submit',
     caller: string = 'BrowserShell.loadAddress'
   ): void {
+    this.clearHistorySuppression();
     // Classify the raw input before normalization. Search-result URLs must not
     // erase the query that the user entered, while an explicitly supplied URL
     // remains editable as its canonical URL even when it points at a search
@@ -3290,6 +3307,7 @@ export struct BrowserShell {
     const repository: BrowserRepository | undefined = this.repository;
     if (repository !== undefined) {
       this.historyItems = await repository.listHistory();
+      this.bumpHistoryRevision();
       this.bookmarkItems = await repository.listBookmarks();
     }
     this.showStartPageCustomize = false;
@@ -3309,13 +3327,35 @@ export struct BrowserShell {
     this.bookmarkItems = await repository.listBookmarks();
   }
 
-  private async removeHistory(url: string): Promise<void> {
+  private async removeHistory(entry: LibraryEntry): Promise<void> {
     const repository: BrowserRepository | undefined = this.repository;
     if (repository === undefined) {
       return;
     }
-    await repository.removeHistory(url);
+    const activeTab: BrowserTabRecord | undefined = this.activeTab();
+    if (activeTab !== undefined && activeTab.url === entry.url) {
+      this.historySuppressedTabId = activeTab.id;
+      this.historySuppressedUrl = activeTab.url;
+    }
+    let removedFromView: boolean = false;
+    this.historyItems = this.historyItems.filter((record: HistoryRecord) => {
+      const matches: boolean = !removedFromView && record.url === entry.url &&
+        record.visitedAt === entry.timestamp;
+      if (matches) {
+        removedFromView = true;
+        return false;
+      }
+      return true;
+    });
+    this.bumpHistoryRevision();
+    this.syncFrequentSites(this.historyItems);
+    await repository.removeHistoryEntry({
+      url: entry.url,
+      title: entry.title,
+      visitedAt: entry.timestamp
+    });
     this.historyItems = await repository.listHistory();
+    this.bumpHistoryRevision();
     this.syncFrequentSites(this.historyItems);
   }
 
@@ -3334,6 +3374,7 @@ export struct BrowserShell {
       await repository.removeHistoryFrom(cutoff);
     }
     this.historyItems = await repository.listHistory();
+    this.bumpHistoryRevision();
     this.syncFrequentSites(this.historyItems);
   }
 
@@ -3447,6 +3488,7 @@ export struct BrowserShell {
     const currentTabId: TabId = this.tabStore.activeTabId;
     const currentUrl: string = this.activeAddress();
     this.overviewVisualTabId = currentTabId;
+    this.overviewGridScrollOffset = this.initialOverviewGridScrollOffset(currentTabId);
 
     // A tab button tap must terminate an in-flight strip animation before the
     // overview starts.  No settling state is allowed to leak into the sheet.
@@ -3623,6 +3665,7 @@ export struct BrowserShell {
   ): Promise<void> {
     if (this.dispatcher === undefined) {
       this.overviewVisualTabId = '';
+      this.overviewGridScrollOffset = -1;
       this.bumpTabStateRevision();
       return;
     }
@@ -3639,6 +3682,7 @@ export struct BrowserShell {
     this.refreshNavigationState();
     this.gestureActive = false;
     this.overviewVisualTabId = '';
+    this.overviewGridScrollOffset = -1;
     this.bumpTabStateRevision();
     this.logTabOverview(
       false,
@@ -3745,7 +3789,17 @@ export struct BrowserShell {
     void this.repository?.saveStartPageItems(this.startPageItems);
   }
 
+  private bumpHistoryRevision(): void {
+    this.historyRevision += 1;
+  }
+
+  private clearHistorySuppression(): void {
+    this.historySuppressedTabId = '';
+    this.historySuppressedUrl = '';
+  }
+
   private onReload(): void {
+    this.clearHistorySuppression();
     this.dispatcher?.reloadActiveTab();
   }
 
@@ -3798,12 +3852,19 @@ export struct BrowserShell {
     if (repository === undefined || tab.isPrivate || tab.url === 'about:blank') {
       return;
     }
+    if (this.historySuppressedTabId === tab.id) {
+      if (this.historySuppressedUrl === tab.url) {
+        return;
+      }
+      this.clearHistorySuppression();
+    }
     await repository.recordHistory({
       url: tab.url,
       title: tab.title.length > 0 ? tab.title : tab.url,
       visitedAt: Date.now()
     }, false);
     this.historyItems = await repository.listHistory();
+    this.bumpHistoryRevision();
     this.syncFrequentSites(this.historyItems);
   }
 
@@ -3925,11 +3986,46 @@ export struct BrowserShell {
     tabId: TabId,
     controller: webview.WebviewController
   ): Promise<image.PixelMap | undefined> {
+    const viewportHeight: number = availableContentHeight(this.viewportHeight, this.topAvoidInset);
+    const fallbackSize: TabOverviewSnapshotSize = tabOverviewSnapshotSize(
+      Number.NaN,
+      Number.NaN,
+      this.viewportWidth,
+      viewportHeight
+    );
+    const snapshotSize: TabOverviewSnapshotSize = await new Promise<TabOverviewSnapshotSize>(
+      (resolve: (value: TabOverviewSnapshotSize) => void) => {
+        try {
+          controller.runJavaScriptExt(
+            '[document.documentElement.scrollWidth, document.documentElement.scrollHeight]',
+            (error, result) => {
+              if (error || result === undefined || result.getType() !== webview.JsMessageType.ARRAY) {
+                resolve(fallbackSize);
+                return;
+              }
+              try {
+                const values: Array<string | number | boolean> = result.getArray();
+                resolve(tabOverviewSnapshotSize(
+                  Number(values[0]),
+                  Number(values[1]),
+                  this.viewportWidth,
+                  viewportHeight
+                ));
+              } catch (_error) {
+                resolve(fallbackSize);
+              }
+            }
+          );
+        } catch (_error) {
+          resolve(fallbackSize);
+        }
+      }
+    );
     return await new Promise<image.PixelMap | undefined>((resolve: (value: image.PixelMap | undefined) => void) => {
       try {
         controller.webPageSnapshot({
           id: `tab-${tabId}`,
-          size: { width: 720, height: 720 }
+          size: snapshotSize
         }, (error, result) => {
           if (error || result === undefined || result.status !== true || result.imagePixelMap === undefined) {
             resolve(undefined);
@@ -4627,6 +4723,18 @@ export struct BrowserShell {
     this.overviewSearchProgress = Math.max(0, Math.min(1, progress));
   }
 
+  private updateOverviewGridScrollOffset(offset: number): void {
+    if (!Number.isFinite(offset)) {
+      return;
+    }
+    const bounded: number = Math.max(0, offset);
+    if (this.overviewGridScrollOffset >= 0 &&
+      Math.abs(this.overviewGridScrollOffset - bounded) < 0.5) {
+      return;
+    }
+    this.overviewGridScrollOffset = bounded;
+  }
+
   private springBackAddressGesture(): void {
     const transitionToken: number = this.addressTransitionToken;
     const returnPreviewX: number = this.previewKind === TabPreviewKind.EXISTING_TAB
@@ -4866,15 +4974,42 @@ export struct BrowserShell {
     );
   }
 
+  private initialOverviewGridScrollOffset(tabId: TabId): number {
+    const activeIndex: number = this.tabStore.tabs.findIndex((tab: BrowserTabRecord) =>
+      tab.id === tabId);
+    const maxScrollOffset: number = tabOverviewGridMaxScrollOffset(
+      this.tabStore.tabs.length,
+      this.viewportHeight,
+      this.topAvoidInset,
+      this.bottomAvoidInset,
+      0
+    );
+    return tabOverviewActiveCardScrollOffset(activeIndex, maxScrollOffset);
+  }
+
   private overviewPageFrameForRender(): TabOverviewPageFrame {
+    const activeIndex: number = this.tabStore.tabs.findIndex((tab: BrowserTabRecord) =>
+      tab.id === this.overviewVisualTabIdForRender());
+    const maxScrollOffset: number = tabOverviewGridMaxScrollOffset(
+      this.tabStore.tabs.length,
+      this.viewportHeight,
+      this.topAvoidInset,
+      this.bottomAvoidInset,
+      this.overviewSearchProgress
+    );
+    const entryScrollOffset: number = tabOverviewActiveCardScrollOffset(activeIndex, maxScrollOffset);
+    const measuredScrollOffset: number = this.overviewGridScrollOffset >= 0 &&
+      Number.isFinite(this.overviewGridScrollOffset)
+      ? this.overviewGridScrollOffset
+      : entryScrollOffset;
     return tabOverviewPageFrame(
       this.overviewProgress,
       this.viewportWidth,
       this.viewportHeight,
-      this.tabStore.tabs.findIndex((tab: BrowserTabRecord) =>
-        tab.id === this.overviewVisualTabIdForRender()),
+      activeIndex,
       this.topAvoidInset,
-      this.overviewSearchProgress
+      this.overviewSearchProgress,
+      measuredScrollOffset
     );
   }
 
@@ -5174,7 +5309,11 @@ export struct BrowserShell {
             livePageTransform: true,
             revision: this.cardRevision,
             topInset: this.topAvoidInset,
+            viewportWidth: this.viewportWidth,
+            viewportHeight: this.viewportHeight,
+            gridScrollOffset: this.overviewGridScrollOffset,
             onSearchProgress: (progress: number) => this.updateOverviewSearchProgress(progress),
+            onGridScroll: (offset: number) => this.updateOverviewGridScrollOffset(offset),
             cardProgressFor: (tabId: TabId) => this.cardProgressFor(tabId),
             cardOffsetFor: (tabId: TabId) => this.cardOffsetFor(tabId),
             cardHorizontalOffsetFor: (tabId: TabId) => this.cardHorizontalOffsetFor(tabId),
@@ -5243,12 +5382,13 @@ export struct BrowserShell {
         if (this.showLibrary && !this.showDownloadManager && this.overviewProgress === 0) {
           LibrarySheet({
             history: this.historyItems,
+            historyRevision: this.historyRevision,
             bookmarks: this.bookmarkItems,
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
             onOpen: (url: string) => this.openLibraryEntry(url),
             onRemoveBookmark: (url: string) => { void this.removeBookmark(url); },
-            onRemoveHistory: (url: string) => { void this.removeHistory(url); },
+            onRemoveHistory: (entry: LibraryEntry) => { void this.removeHistory(entry); },
             onDeleteHistoryRange: (range: HistoryDeleteRange) => { void this.removeHistoryRange(range); },
             onClose: () => this.closeLibrary()
           })

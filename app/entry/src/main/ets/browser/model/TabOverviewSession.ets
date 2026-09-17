@@ -1,14 +1,5 @@
-import {
-  BrowserTabRecord,
-  displayUrlFor,
-  lastValidUrlForTab,
-  TabId
-} from './BrowserTypes';
-import {
-  DEFAULT_PAGE_DISPLAY_STATE,
-  PageDisplayState,
-  copyPageDisplayState
-} from './PageDisplayState';
+import { BrowserTabRecord, displayUrlFor, lastValidUrlForTab, TabId } from './BrowserTypes';
+import { copyPageDisplayState, DEFAULT_PAGE_DISPLAY_STATE, PageDisplayState } from './PageDisplayState';
 
 /** The immutable tab data captured before the overview becomes visible. */
 export interface TabOverviewTabSnapshot {

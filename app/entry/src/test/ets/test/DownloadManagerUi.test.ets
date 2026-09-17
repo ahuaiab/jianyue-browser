@@ -1,18 +1,11 @@
 import { describe, expect, it } from '@ohos/hypium';
-import {
-  DownloadBackend,
-  DownloadStatus,
-  DownloadTaskRecord
-} from '../../../main/ets/browser/model/DownloadModels';
-import {
-  pageMenuActions,
-  PageAction
-} from '../../../main/ets/browser/model/PageActions';
+import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from '../../../main/ets/browser/model/DownloadModels';
+import { PageAction, pageMenuActions } from '../../../main/ets/browser/model/PageActions';
 import {
   DownloadManagerActionKind,
   downloadManagerActionKindFor,
-  downloadManagerProgressLabel,
   downloadManagerDetailLabel,
+  downloadManagerProgressLabel,
   downloadManagerSubtitleLabel,
   downloadManagerTaskId
 } from '../../../main/ets/browser/components/DownloadManagerSheet';

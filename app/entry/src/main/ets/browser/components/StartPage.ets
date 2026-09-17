@@ -1,15 +1,12 @@
 import { BrowserSettings } from '../model/BrowserSettings';
 import {
-  StartPageItem,
-  StartPageItemType,
   shouldRenderStartPageSection,
   sortStartPageItems,
-  startPageBackgroundSource
+  startPageBackgroundSource,
+  StartPageItem,
+  StartPageItemType
 } from '../model/StartPageModels';
-import {
-  HARMONY_RADIUS_CONTROL,
-  HARMONY_RADIUS_CARD
-} from '../model/BrowserVisualMetrics';
+import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_CONTROL } from '../model/BrowserVisualMetrics';
 import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 
 /**

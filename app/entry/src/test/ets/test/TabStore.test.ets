@@ -1,8 +1,6 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
-  BrowserSessionSnapshot,
-  TabDirection,
-  TabResidency
+  BrowserSessionSnapshot, TabDirection, TabResidency
 } from '../../../main/ets/browser/model/BrowserTypes';
 import { TabStore } from '../../../main/ets/browser/store/TabStore';
 

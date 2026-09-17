@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
-  AddressBarPresentationMode,
   addressBarPresentationForInput,
-  addressEditorDraftFor,
+  AddressBarPresentationMode,
   addressClearButtonVisibleFor,
+  addressEditorDraftFor,
   addressLockImageVerticalOffsetFor,
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,

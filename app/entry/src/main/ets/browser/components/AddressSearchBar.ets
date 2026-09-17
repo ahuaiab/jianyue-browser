@@ -1,8 +1,4 @@
-import {
-  PageAction,
-  pageModeMenuLabel,
-  pageModeMenuSymbolName
-} from '../model/PageActions';
+import { PageAction, pageModeMenuLabel, pageModeMenuSymbolName } from '../model/PageActions';
 import {
   addressBarLabelFor,
   AddressSecurityState,
@@ -13,19 +9,16 @@ import {
 import { PageFontSize } from '../model/PageDisplayState';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { ADDRESS_SEARCH_BAR_STYLE, ADDRESS_SEARCH_BAR_TOP_PADDING } from '../model/TabOverviewActions';
 import {
-  ADDRESS_SEARCH_BAR_STYLE,
-  ADDRESS_SEARCH_BAR_TOP_PADDING
-} from '../model/TabOverviewActions';
-import {
-  addressEditorText,
   addressClearButtonVisibleFor,
+  addressCollapsedTextPaddingFor,
+  addressEditorText,
+  addressInputLeftPaddingFor,
   addressLockImageVerticalOffsetFor,
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,
   addressTextColorFor,
-  addressCollapsedTextPaddingFor,
-  addressInputLeftPaddingFor,
   placeholderForFocus,
   syncAddressDraft
 } from '../model/BrowserInteraction';

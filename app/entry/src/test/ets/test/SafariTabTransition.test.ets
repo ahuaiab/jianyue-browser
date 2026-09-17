@@ -1,20 +1,22 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   newTabPullProgress,
-  TabPreviewKind,
-  tabGestureOffsetForRender
+  tabGestureOffsetForRender,
+  TabPreviewKind
 } from '../../../main/ets/browser/model/TabGestureMotion';
 import {
   addressItemLeft,
   addressOffsetForIndex,
+  nativeTabIndexForId,
+  newTabHandoffVisual,
   newTabPreviewVisual,
+  pendingTabVisualIndex,
   safariTransitionFrame,
   sceneOffsetForIndex,
   shouldPrimeFinalTabPreview,
   shouldRenderAddressItem,
   shouldRenderStableTabPreview,
   tabSceneKeys,
-  nativeTabIndexForId,
   tabTransitionSceneVisualState
 } from '../../../main/ets/browser/model/SafariTabTransition';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
@@ -118,6 +120,12 @@ export default function safariTabTransitionTest() {
       expect(ready.addressBackgroundOpacity).assertEqual(1);
     });
 
+    it('keeps the handoff placeholder centered throughout the crossfade', 0, () => {
+      expect(newTabHandoffVisual(0).placeholderTextAlignment).assertEqual('center');
+      expect(newTabHandoffVisual(0.5).placeholderTextAlignment).assertEqual('center');
+      expect(newTabHandoffVisual(1).placeholderTextAlignment).assertEqual('center');
+    });
+
     it('shares the close transform between the active card and live page', 0, () => {
       const frame = tabOverviewLivePageCloseFrame(0.5, -30);
       expect(frame.horizontalOffset).assertEqual(-30);
@@ -145,6 +153,13 @@ export default function safariTabTransitionTest() {
       const committedIds: string[] = ['tab-a', 'tab-b'];
       expect(nativeTabIndexForId(committedIds, 'tab-b')).assertEqual(1);
       expect(nativeTabIndexForId(committedIds, 'pending-c')).assertEqual(-1);
+    });
+
+    it('keeps the pending address slot when the draft becomes a committed tab', 0, () => {
+      const beforeCommit: string[] = ['tab-a', 'tab-b'];
+      const afterCommit: string[] = ['tab-a', 'tab-b', 'pending-c'];
+      expect(pendingTabVisualIndex('pending-c', beforeCommit)).assertEqual(2);
+      expect(pendingTabVisualIndex('pending-c', afterCommit)).assertEqual(2);
     });
 
     it('maps the address stride independently from page width', 0, () => {
