@@ -11,8 +11,6 @@ import {
   tabOverviewCardCaptionVisualOpacity,
   tabOverviewChromeFrame,
   TabOverviewChromeFrame,
-  tabOverviewChromeOpacity,
-  tabOverviewChromeTranslateY,
   tabOverviewGridOpacityAtProgress,
   tabOverviewActiveCardScrollOffset,
   tabOverviewGridMaxScrollOffset,
@@ -95,8 +93,8 @@ export default function tabOverviewTransitionTest() {
       const afterGridScroll: TabOverviewPageFrame = tabOverviewPageFrame(
         1, 400, 800, 4, 0, 0, 120
       );
-      expect(afterGridScroll.clipTop).assertEqual(atGridOrigin.clipTop - 120);
-      expect(afterGridScroll.translateY).assertEqual(atGridOrigin.translateY - 120);
+      expect(afterGridScroll.clipTop.toFixed(6)).assertEqual((atGridOrigin.clipTop - 120).toFixed(6));
+      expect(afterGridScroll.translateY.toFixed(6)).assertEqual((atGridOrigin.translateY - 120).toFixed(6));
       expect(afterGridScroll.captionLocalTop).assertEqual(atGridOrigin.captionLocalTop);
     });
 
@@ -132,17 +130,40 @@ export default function tabOverviewTransitionTest() {
       expect((localRadius * frame.scaleX).toFixed(6)).assertEqual(frame.cornerRadius.toFixed(6));
     });
 
-    it('moves the browser bar down on entry and back up on dismissal', 0, () => {
-      expect(tabOverviewChromeOpacity(0)).assertEqual(1);
-      expect(tabOverviewChromeOpacity(0.18)).assertEqual(1);
-      expect(tabOverviewChromeOpacity(0.37)).assertEqual(0.5);
-      expect(tabOverviewChromeOpacity(0.56)).assertEqual(0);
-      expect(tabOverviewChromeOpacity(1)).assertEqual(0);
-      expect(tabOverviewChromeTranslateY(0, 104)).assertEqual(0);
-      expect(tabOverviewChromeTranslateY(0.18, 104)).assertEqual(0);
-      expect(tabOverviewChromeTranslateY(0.37, 104).toFixed(6)).assertEqual('52.000000');
-      expect(tabOverviewChromeTranslateY(0.56, 104).toFixed(6)).assertEqual('104.000000');
-      expect(tabOverviewChromeTranslateY(1, 104).toFixed(6)).assertEqual('104.000000');
+    it('attaches the address bottom to the current card bottom after overlap', 0, () => {
+      const page: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 0);
+      const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.5, false, 400, 800, 104, page
+      );
+      const addressBottom: number = frame.addressVisualTop + frame.addressVisualHeight;
+      const cardBottom: number = page.clipTop + page.clipHeight;
+      expect(Math.abs(addressBottom - cardBottom) <= 0.000001).assertTrue();
+    });
+
+    it('starts toolbar rebound only after the address leaves the bottom chrome', 0, () => {
+      const before: TabOverviewPageFrame = tabOverviewPageFrame(0.18, 400, 800, 0, 0);
+      const after: TabOverviewPageFrame = tabOverviewPageFrame(0.3, 400, 800, 0, 0);
+      const beforeChrome: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.18, false, 400, 800, 104, before
+      );
+      const afterChrome: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.3, false, 400, 800, 104, after
+      );
+      expect(beforeChrome.toolbarOpacity).assertEqual(1);
+      expect(afterChrome.toolbarOpacity < 1).assertTrue();
+      expect(afterChrome.toolbarTranslateY > 0).assertTrue();
+    });
+
+    it('uses the same toolbar geometry while reversing the overview', 0, () => {
+      const page: TabOverviewPageFrame = tabOverviewPageFrame(0.3, 400, 800, 0, 0);
+      const entering: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.3, false, 400, 800, 104, page
+      );
+      const leaving: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.3, true, 400, 800, 104, page
+      );
+      expect(leaving.toolbarOpacity.toFixed(6)).assertEqual(entering.toolbarOpacity.toFixed(6));
+      expect(leaving.toolbarTranslateY.toFixed(6)).assertEqual(entering.toolbarTranslateY.toFixed(6));
     });
 
     it('keeps the address capsule width on the same track as the live page', 0, () => {
@@ -186,11 +207,11 @@ export default function tabOverviewTransitionTest() {
       const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
         0.5, false, 400, 800, 104, middlePage
       );
-      const expectedTop: number = 704 +
-        ((endPage.clipTop + endPage.clipHeight - 44 * endPage.scaleY) - 704) * 0.5;
       const expectedWidth: number = 384 + (endPage.clipWidth - 384) * 0.5;
+      const addressBottom: number = frame.addressVisualTop + frame.addressVisualHeight;
+      const cardBottom: number = middlePage.clipTop + middlePage.clipHeight;
       expect(frame.addressScaleX.toFixed(6)).assertEqual(middlePage.scaleX.toFixed(6));
-      expect(frame.addressVisualTop.toFixed(6)).assertEqual(expectedTop.toFixed(6));
+      expect(addressBottom.toFixed(6)).assertEqual(cardBottom.toFixed(6));
       expect(frame.addressVisualWidth.toFixed(6)).assertEqual(expectedWidth.toFixed(6));
     });
 
@@ -256,13 +277,17 @@ export default function tabOverviewTransitionTest() {
 
     it('adds a bounded jelly response while the address capsule merges back', 0, () => {
       const page: TabOverviewPageFrame = tabOverviewPageFrame(0.09, 400, 800, 0, 0);
-      const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
+      const jellyFrame: TabOverviewChromeFrame = tabOverviewChromeFrame(
         0.09, true, 400, 800, 104, page
       );
-      expect(frame.addressJellyScaleX > 1).assertTrue();
-      expect(frame.addressJellyScaleY < 1).assertTrue();
-      expect(frame.toolbarOpacity > 0).assertTrue();
-      expect(frame.toolbarOpacity < 1).assertTrue();
+      expect(jellyFrame.addressJellyScaleX > 1).assertTrue();
+      expect(jellyFrame.addressJellyScaleY < 1).assertTrue();
+      const toolbarPage: TabOverviewPageFrame = tabOverviewPageFrame(0.3, 400, 800, 0, 0);
+      const toolbarFrame: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.3, true, 400, 800, 104, toolbarPage
+      );
+      expect(toolbarFrame.toolbarOpacity > 0).assertTrue();
+      expect(toolbarFrame.toolbarOpacity < 1).assertTrue();
     });
 
     it('keeps the live label attached to the shrinking page bottom', 0, () => {

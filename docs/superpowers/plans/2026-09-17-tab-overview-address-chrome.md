@@ -75,10 +75,10 @@ The `0.5` assertion is intentionally incompatible with the current target interp
 
 - [ ] **Step 2: Run the focused Local Test and verify it fails for the intended reason**
 
-Run from `E:\HarmonyOS\jianyue-browser`:
+Run from the DevEco project directory `E:\HarmonyOS\jianyue-browser\app`:
 
 ```text
-python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser --module entry --no-coverage --scope TabOverviewTransition
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser\app --module entry --no-coverage --scope TabOverviewTransition
 ```
 
 Expected result: the suite is collected, and the new address/card assertion fails because the current frame uses the fixed target interpolation; no test collection or ArkTS syntax error is acceptable.
@@ -244,15 +244,15 @@ Keep the existing width and scale assertions because they still verify the share
 
 - [ ] **Step 2: Update reverse-jelly coverage to sample the dynamic exit window**
 
-Use `0.3` for the reverse toolbar jelly test instead of `0.09`, because the toolbar is now expected to be fully visible before the dynamic exit point and to return along the same geometry after it.
+Keep the address-jelly assertion at `0.09`, which is inside the reverse address return window, and use a separate `0.3` sample for the toolbar assertion because the toolbar now begins its handoff from the measured card-bottom crossing and returns along the same geometry.
 
 - [ ] **Step 3: Run the focused suite and then the complete entry Local Test**
 
 Run:
 
 ```text
-python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser --module entry --no-coverage --scope TabOverviewTransition
-python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser --module entry --no-coverage
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser\app --module entry --no-coverage --scope TabOverviewTransition
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\HarmonyOS\jianyue-browser\app --module entry --no-coverage
 ```
 
 Expected result: `TabOverviewTransition` passes, then the complete `entry` module reports success. If the first command fails for collection or ArkTS compilation, fix that issue before running the full module.

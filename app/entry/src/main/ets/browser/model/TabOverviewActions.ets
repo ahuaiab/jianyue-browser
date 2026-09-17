@@ -572,14 +572,15 @@ export function tabOverviewBottomChromeZIndex(closing: boolean): number {
   return closing ? 25 : 10;
 }
 
-/** Entry starts the toolbar handoff only after the address capsule has split. */
-export const TAB_OVERVIEW_TOOLBAR_STRETCH_START_PROGRESS: number = 0.22;
-export const TAB_OVERVIEW_TOOLBAR_STRETCH_END_PROGRESS: number = 0.44;
-export const TAB_OVERVIEW_TOOLBAR_HIDE_START_PROGRESS: number = 0.42;
-export const TAB_OVERVIEW_TOOLBAR_HIDE_END_PROGRESS: number = 0.78;
+/** Short screen-space handoff after the card bottom reaches the address row. */
+export const TAB_OVERVIEW_ADDRESS_ATTACH_DURATION_PROGRESS: number = 0.08;
+/** Address-only jelly remains independent from the toolbar exit handoff. */
+export const TAB_OVERVIEW_ADDRESS_JELLY_START_PROGRESS: number = 0.22;
+export const TAB_OVERVIEW_ADDRESS_JELLY_END_PROGRESS: number = 0.44;
+/** The bottom toolbar leaves in one short rebound after its dynamic exit point. */
+export const TAB_OVERVIEW_TOOLBAR_HIDE_DURATION_PROGRESS: number = 0.20;
 
 /** Reverse expansion keeps the toolbar below the page until the address rejoins. */
-export const TAB_OVERVIEW_TOOLBAR_RETURN_END_PROGRESS: number = 0.22;
 export const TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS: number = 0.18;
 
 /** Handoff the transient address capsule to the settled card caption. */
@@ -615,6 +616,37 @@ export function tabOverviewCaptionHandoffOpacity(progress: number, _closing: boo
   // The same track is reversible: progress falls during dismissal, so the
   // caption naturally fades out without a second animation timeline.
   return handoff;
+}
+
+/** Find the progress at which the shrinking card reaches the address row. */
+function tabOverviewAddressAttachStartProgress(
+  viewportHeight: number,
+  addressTop: number,
+  addressHeight: number,
+  targetCardBottom: number,
+  targetScaleY: number
+): number {
+  const initialGap: number = viewportHeight - (addressTop + addressHeight);
+  const targetGap: number = targetCardBottom -
+    (addressTop + addressHeight * targetScaleY);
+  const denominator: number = initialGap - targetGap;
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 1;
+  }
+  return Math.max(0, Math.min(1, initialGap / denominator));
+}
+
+/** Find when the card bottom has completely cleared the fixed bottom chrome. */
+function tabOverviewToolbarExitProgress(
+  viewportHeight: number,
+  chromeHeight: number,
+  targetCardBottom: number
+): number {
+  const distance: number = viewportHeight - targetCardBottom;
+  if (!Number.isFinite(distance) || distance <= 0) {
+    return 1;
+  }
+  return Math.max(0, Math.min(1, chromeHeight / distance));
 }
 
 /**
@@ -667,24 +699,37 @@ export function tabOverviewChromeFrame(
   const targetHeight: number = clampedProgress > 0
     ? height + (pageFrame.clipHeight - height) / progressForTarget
     : height;
-  const targetAddressHeight: number = fullHeight * targetScaleY;
-  const targetAddressTop: number = targetTop + targetHeight - targetAddressHeight;
+  const scaleX: number = pageScale;
+  const scaleY: number = pageScaleY;
+  const currentCardBottom: number = pageFrame.clipTop + pageFrame.clipHeight;
+  const addressHeight: number = fullHeight * scaleY;
+  const attachStart: number = tabOverviewAddressAttachStartProgress(
+    height,
+    fullTop,
+    fullHeight,
+    targetTop + targetHeight,
+    targetScaleY
+  );
+  const attachEnd: number = Math.min(
+    1,
+    attachStart + TAB_OVERVIEW_ADDRESS_ATTACH_DURATION_PROGRESS
+  );
+  const attachProgress: number = overviewSegmentProgress(
+    clampedProgress,
+    attachStart,
+    attachEnd
+  );
+  const attachedTop: number = currentCardBottom - addressHeight;
   const visualLeft: number = interpolateOverviewValue(
     fullLeft, targetLeft, clampedProgress
   );
   const visualTop: number = interpolateOverviewValue(
-    fullTop, targetAddressTop, clampedProgress
+    fullTop, attachedTop, attachProgress
   );
   const visualWidth: number = interpolateOverviewValue(
     fullWidth, targetWidth, clampedProgress
   );
-  const visualHeight: number = interpolateOverviewValue(
-    fullHeight, targetAddressHeight, clampedProgress
-  );
-  // The live page frame already contains the current scale. Reusing it
-  // directly keeps the capsule's transform phase-locked to the page.
-  const scaleX: number = pageScale;
-  const scaleY: number = pageScaleY;
+  const visualHeight: number = addressHeight;
   const layoutWidth: number = Math.max(16, visualWidth / Math.max(0.01, scaleX) + 16);
   // The strip's active capsule is centered with an 8vp inset in its local box.
   // Compensate for ArkUI's center-based scale before placing that box.
@@ -695,41 +740,38 @@ export function tabOverviewChromeFrame(
     ? overviewJellyProgress(clampedProgress, 0, TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS)
     : overviewJellyProgress(
       clampedProgress,
-      TAB_OVERVIEW_TOOLBAR_STRETCH_START_PROGRESS,
-      TAB_OVERVIEW_TOOLBAR_STRETCH_END_PROGRESS
+      TAB_OVERVIEW_ADDRESS_JELLY_START_PROGRESS,
+      TAB_OVERVIEW_ADDRESS_JELLY_END_PROGRESS
     );
-  const toolbarJellyProgress: number = closing
-    ? overviewJellyProgress(clampedProgress, 0, TAB_OVERVIEW_TOOLBAR_RETURN_END_PROGRESS)
-    : overviewJellyProgress(
-      clampedProgress,
-      TAB_OVERVIEW_TOOLBAR_STRETCH_START_PROGRESS,
-      TAB_OVERVIEW_TOOLBAR_STRETCH_END_PROGRESS
-    );
+  const toolbarExitStart: number = tabOverviewToolbarExitProgress(
+    height,
+    safeChromeHeight,
+    targetTop + targetHeight
+  );
+  const toolbarExitEnd: number = Math.min(
+    1,
+    toolbarExitStart + TAB_OVERVIEW_TOOLBAR_HIDE_DURATION_PROGRESS
+  );
+  const toolbarHideProgress: number = overviewSegmentProgress(
+    clampedProgress,
+    toolbarExitStart,
+    toolbarExitEnd
+  );
+  const toolbarJellyProgress: number = overviewJellyProgress(
+    clampedProgress,
+    toolbarExitStart,
+    toolbarExitEnd
+  );
   const addressHandoff: number = overviewSegmentProgress(
     clampedProgress,
     TAB_OVERVIEW_ADDRESS_HANDOFF_START_PROGRESS,
     TAB_OVERVIEW_ADDRESS_HANDOFF_END_PROGRESS
   );
   const addressOpacity: number = 1 - addressHandoff;
-  let toolbarOpacity: number;
-  let toolbarTranslateY: number;
   const toolbarJellyAnchorOffset: number = toolbarJellyProgress * safeChromeHeight * 0.05;
-  if (closing) {
-    const returnProgress: number = 1 - overviewSegmentProgress(
-      clampedProgress, 0, TAB_OVERVIEW_TOOLBAR_RETURN_END_PROGRESS
-    );
-    toolbarOpacity = returnProgress;
-    toolbarTranslateY = safeChromeHeight * (1 - returnProgress) -
-      toolbarJellyAnchorOffset;
-  } else {
-    const hideProgress: number = overviewSegmentProgress(
-      clampedProgress,
-      TAB_OVERVIEW_TOOLBAR_HIDE_START_PROGRESS,
-      TAB_OVERVIEW_TOOLBAR_HIDE_END_PROGRESS
-    );
-    toolbarOpacity = 1 - hideProgress;
-    toolbarTranslateY = safeChromeHeight * hideProgress - toolbarJellyAnchorOffset;
-  }
+  const toolbarOpacity: number = 1 - toolbarHideProgress;
+  const toolbarTranslateY: number = safeChromeHeight * toolbarHideProgress -
+    toolbarJellyAnchorOffset;
   return {
     addressLeft,
     addressTop,
@@ -750,37 +792,6 @@ export function tabOverviewChromeFrame(
     // Keep the bottom edge visually anchored while the top edge stretches up.
     toolbarScaleY: 1 + toolbarJellyProgress * 0.10
   };
-}
-
-/** Fade the fixed browser chrome with the same progress as the page morph. */
-export function tabOverviewChromeOpacity(progress: number): number {
-  return 1 - tabOverviewChromeMotionProgress(progress);
-}
-
-/** Move the fixed browser chrome below the viewport while overview opens. */
-export function tabOverviewChromeTranslateY(progress: number, chromeHeight: number): number {
-  if (!Number.isFinite(chromeHeight) || chromeHeight <= 0) {
-    return 0;
-  }
-  return chromeHeight * tabOverviewChromeMotionProgress(progress);
-}
-
-// Leave the fixed address field visible only while the page is still in its
-// full-screen phase. It must be gone before the live card caption reaches the
-// card handoff, otherwise two address labels are visible at once.
-const TAB_OVERVIEW_CHROME_FADE_START_PROGRESS: number = 0.18;
-const TAB_OVERVIEW_CHROME_FADE_END_PROGRESS: number = 0.56;
-
-function tabOverviewChromeMotionProgress(progress: number): number {
-  const clamped: number = clampOverviewProgress(progress);
-  if (clamped <= TAB_OVERVIEW_CHROME_FADE_START_PROGRESS) {
-    return 0;
-  }
-  if (clamped >= TAB_OVERVIEW_CHROME_FADE_END_PROGRESS) {
-    return 1;
-  }
-  return (clamped - TAB_OVERVIEW_CHROME_FADE_START_PROGRESS) /
-    (TAB_OVERVIEW_CHROME_FADE_END_PROGRESS - TAB_OVERVIEW_CHROME_FADE_START_PROGRESS);
 }
 
 function clampOverviewProgress(progress: number): number {
