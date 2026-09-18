@@ -21,6 +21,7 @@ import {
   newTabHandoffVisual,
   newTabPreviewVisual,
   pendingTabVisualIndex,
+  shouldAnimateAddressItemExit,
   shouldRenderAddressHandoff,
   shouldRenderAddressItem,
   shouldRenderPendingTabPreview
@@ -300,12 +301,15 @@ export struct AddressTabStrip {
       .opacity(this.itemOpacity(index))
       // An adjacent tab is a transient visual item. If the gesture commits or
       // springs back, let ArkUI fade that item out before its keyed node is
-      // removed. The active address field itself never receives a commit fade.
+      // removed. A committed handoff disables this exit animation for every
+      // item so the old active capsule cannot overlap the handoff owner.
       .transition(
-        TransitionEffect.asymmetric(
-          TransitionEffect.IDENTITY,
-          TransitionEffect.OPACITY
-        ).animation({ duration: SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS, curve: Curve.EaseOut })
+        shouldAnimateAddressItemExit(index, this.activeIndex, this.addressHandoffMounted)
+          ? TransitionEffect.asymmetric(
+            TransitionEffect.IDENTITY,
+            TransitionEffect.OPACITY
+          ).animation({ duration: SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS, curve: Curve.EaseOut })
+          : TransitionEffect.IDENTITY
       )
       .hitTestBehavior(index === this.activeIndex ? HitTestMode.Default : HitTestMode.None);
   }

@@ -15,6 +15,8 @@ import {
   sceneOffsetForIndex,
   shouldPrimeFinalTabPreview,
   shouldRenderAddressItem,
+  shouldAnimateAddressItemExit,
+  shouldCaptureStartPageThumbnailNow,
   shouldRenderStableTabPreview,
   tabSceneKeys,
   tabTransitionSceneVisualState
@@ -196,6 +198,34 @@ export default function safariTabTransitionTest() {
     it('does not render the committed address item while handoff owns its slot', 0, () => {
       expect(shouldRenderAddressItem(0, 0, 0, 1, TabPreviewKind.EXISTING_TAB, true)).assertFalse();
       expect(shouldRenderAddressItem(0, 0, 0, 1, TabPreviewKind.EXISTING_TAB, false)).assertTrue();
+    });
+
+    it('does not animate an address item out during handoff', 0, () => {
+      expect(shouldAnimateAddressItemExit(0, 0, false)).assertFalse();
+      expect(shouldAnimateAddressItemExit(1, 0, false)).assertTrue();
+      expect(shouldAnimateAddressItemExit(0, 0, true)).assertFalse();
+      expect(shouldAnimateAddressItemExit(1, 0, true)).assertFalse();
+    });
+
+    it('does not crossfade the handoff plus and placeholder together', 0, () => {
+      for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+        const visual = newTabHandoffVisual(progress);
+        expect(visual.plusOpacity === 0 || visual.placeholderOpacity === 0).assertTrue();
+      }
+      expect(newTabHandoffVisual(0).plusOpacity).assertEqual(1);
+      expect(newTabHandoffVisual(0).placeholderOpacity).assertEqual(0);
+      expect(newTabHandoffVisual(0.25).plusOpacity).assertEqual(1);
+      expect(newTabHandoffVisual(0.25).placeholderOpacity).assertEqual(0);
+      expect(newTabHandoffVisual(0.75).plusOpacity).assertEqual(0);
+      expect(newTabHandoffVisual(0.75).placeholderOpacity).assertEqual(1);
+      expect(newTabHandoffVisual(1).plusOpacity).assertEqual(0);
+      expect(newTabHandoffVisual(1).placeholderOpacity).assertEqual(1);
+    });
+
+    it('defers start-page thumbnail capture while the address handoff is active', 0, () => {
+      expect(shouldCaptureStartPageThumbnailNow(false, false)).assertTrue();
+      expect(shouldCaptureStartPageThumbnailNow(true, false)).assertFalse();
+      expect(shouldCaptureStartPageThumbnailNow(false, true)).assertFalse();
     });
 
   });

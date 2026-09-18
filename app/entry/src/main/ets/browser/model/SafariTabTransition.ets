@@ -114,6 +114,18 @@ export function shouldPreferStableStartPageFrame(
   return isStartPage && handoffActive && hasThumbnail;
 }
 
+/**
+ * A start-page snapshot must not replace the handoff frame while the address
+ * capsule is still settling. The native snapshot can contain the not-yet-
+ * painted StartPage and would briefly turn the page layer white.
+ */
+export function shouldCaptureStartPageThumbnailNow(
+  gestureActive: boolean,
+  addressHandoffActive: boolean
+): boolean {
+  return !gestureActive && !addressHandoffActive;
+}
+
 export function sceneOffsetForIndex(index: number, activeIndex: number, pageWidth: number, dragX: number): number {
   const width: number = Math.max(1, finite(pageWidth));
   return (index - activeIndex) * width + finite(dragX);
@@ -172,6 +184,23 @@ export function shouldRenderAddressItem(index: number, activeIndex: number, drag
   }
   const target: number = active + (dragX < 0 ? 1 : -1);
   return target >= 0 && target < count && item === target;
+}
+
+/**
+ * An address item may fade out only when it is a transient adjacent preview.
+ * During the committed new-tab handoff the old active item is removed at the
+ * same coordinate as the handoff capsule; an exit transition would leave both
+ * owners composited for one or more frames and produce a visible flash.
+ */
+export function shouldAnimateAddressItemExit(
+  index: number,
+  activeIndex: number,
+  handoffMounted: boolean
+): boolean {
+  if (handoffMounted) {
+    return false;
+  }
+  return Math.trunc(finite(index)) !== Math.trunc(finite(activeIndex));
 }
 
 /**
@@ -237,31 +266,24 @@ export function addressPreviewSurfaceVisual(cornerRadius: number): AddressPrevie
 
 /**
  * The reserved-tab glyph and the native address placeholder occupy the same
- * capsule after a new tab is committed. Animate their handoff together so a
- * new StartPage never exposes a one-frame empty/white replacement.
+ * capsule after a new tab is committed. Keep the two owners mutually
+ * exclusive during the handoff: crossfading both layers leaves a translucent
+ * duplicate in the capsule and is visible as a flash on the first frame.
  */
 export function newTabHandoffVisual(progress: number): NewTabHandoffVisual {
   const normalized: number = Math.max(0, Math.min(1, finite(progress)));
   // BrowserShell owns the short plus-only lead-in. The progress supplied here
-  // is therefore the dedicated crossfade timeline: every millisecond of its
-  // extended duration is used by the two overlaid native layers.
-  // There is no visible dot, scale-down, or second leftward slide in this
-  // handoff.
-  const placeholderProgress: number = smoothHandoffProgress(normalized, 0, 1);
+  // is the dedicated handoff timeline. Use one opaque owner at a time instead
+  // of animating two overlaid layers through a translucent intermediate state.
+  const placeholderVisible: boolean = normalized >= 0.5;
   return {
-    plusOpacity: 1 - placeholderProgress,
-    placeholderOpacity: placeholderProgress,
+    plusOpacity: placeholderVisible ? 0 : 1,
+    placeholderOpacity: placeholderVisible ? 1 : 0,
     plusScale: 1,
     placeholderScale: 1,
     placeholderSlideProgress: 1,
     placeholderTextAlignment: 'center'
   };
-}
-
-function smoothHandoffProgress(progress: number, start: number, end: number): number {
-  const span: number = Math.max(0.0001, end - start);
-  const normalized: number = Math.max(0, Math.min(1, (progress - start) / span));
-  return normalized * normalized * (3 - 2 * normalized);
 }
 
 /**

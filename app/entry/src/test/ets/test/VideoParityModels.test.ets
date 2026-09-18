@@ -967,26 +967,25 @@ export default function videoParityModelsTest() {
       expect(newTab.newTabProgress).assertEqual(0.5);
     });
 
-    it('crossfades the new-tab plus into the full placeholder like the Safari reference', 0, () => {
+    it('switches the new-tab plus to the full placeholder without overlap', 0, () => {
       const start = newTabHandoffVisual(0);
       expect(start.plusScale).assertEqual(1);
       expect(start.placeholderScale).assertEqual(1);
       expect(start.placeholderSlideProgress).assertEqual(1);
-      const crossfade = newTabHandoffVisual(0.5);
-      expect(crossfade.plusOpacity > 0.25).assertTrue();
-      expect(crossfade.placeholderOpacity > 0.25).assertTrue();
-      expect(crossfade.plusOpacity < 0.75).assertTrue();
-      expect(crossfade.placeholderOpacity < 0.75).assertTrue();
-      expect(crossfade.plusScale).assertEqual(1);
-      expect(crossfade.placeholderScale).assertEqual(1);
-      expect(crossfade.placeholderSlideProgress).assertEqual(1);
-      const earlyCrossfade = newTabHandoffVisual(0.15);
-      expect(earlyCrossfade.plusOpacity < 1).assertTrue();
-      expect(earlyCrossfade.placeholderOpacity > 0).assertTrue();
-      const crossfadeEnd = newTabHandoffVisual(0.8);
-      expect(crossfadeEnd.placeholderOpacity > 0.85).assertTrue();
-      expect(crossfadeEnd.plusOpacity < 0.15).assertTrue();
+      expect(start.plusOpacity).assertEqual(1);
+      expect(start.placeholderOpacity).assertEqual(0);
+      const earlyHandoff = newTabHandoffVisual(0.25);
+      expect(earlyHandoff.plusOpacity).assertEqual(1);
+      expect(earlyHandoff.placeholderOpacity).assertEqual(0);
+      const settledHandoff = newTabHandoffVisual(0.75);
+      expect(settledHandoff.plusOpacity).assertEqual(0);
+      expect(settledHandoff.placeholderOpacity).assertEqual(1);
+      expect(settledHandoff.plusScale).assertEqual(1);
+      expect(settledHandoff.placeholderScale).assertEqual(1);
+      expect(settledHandoff.placeholderSlideProgress).assertEqual(1);
       const finish = newTabHandoffVisual(1);
+      expect(finish.plusOpacity).assertEqual(0);
+      expect(finish.placeholderOpacity).assertEqual(1);
       expect(finish.plusScale).assertEqual(1);
       expect(finish.placeholderScale).assertEqual(1);
       expect(finish.placeholderSlideProgress).assertEqual(1);

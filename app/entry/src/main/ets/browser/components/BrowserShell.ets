@@ -151,6 +151,7 @@ import {
 import {
   safariTransitionFrame,
   shouldPrimeFinalTabPreview,
+  shouldCaptureStartPageThumbnailNow,
   shouldRenderPendingTabPreview
 } from '../model/SafariTabTransition';
 import { TouchOwner } from '../gesture/TouchOwnership';
@@ -2824,7 +2825,6 @@ export struct BrowserShell {
     this.resetTabViewState(newTabId);
     this.addressEditing = false;
     this.resetAddressDraft();
-    this.scheduleStartPageThumbnail(newTabId);
     this.scheduleHostReattach(newTabId);
     this.overviewProgress = 0;
     this.sceneActiveTabId = newTabId;
@@ -2839,12 +2839,16 @@ export struct BrowserShell {
     this.bumpTabStateRevision();
     const handoffToken: number = this.addressHandoffAnimationToken + 1;
     this.addressHandoffAnimationToken = handoffToken;
-    this.runAddressHandoffPhase(handoffToken, 0);
+    this.runAddressHandoffPhase(handoffToken, 0, newTabId);
     this.logAddressGestureState('commit-new-tab-complete', true, false);
   }
 
-  /** Drive only the native plus/placeholder crossfade after the page settles. */
-  private runAddressHandoffPhase(handoffToken: number, phase: number): void {
+  /** Drive the native address handoff after the page settles. */
+  private runAddressHandoffPhase(
+    handoffToken: number,
+    phase: number,
+    settledTabId: TabId = ''
+  ): void {
     if (phase !== 0) {
       return;
     }
@@ -2875,6 +2879,9 @@ export struct BrowserShell {
       this.addressHandoffProgress = 1;
       this.addressHandoffActive = false;
       this.addressHandoffAnimator = undefined;
+      if (settledTabId.length > 0) {
+        this.scheduleStartPageThumbnail(settledTabId);
+      }
     };
     // Keep the pre-crossfade plus-only interval independent from the extended
     // crossfade. The page spring and the address preview fade never consume
@@ -3964,7 +3971,8 @@ export struct BrowserShell {
 
   private scheduleStartPageThumbnail(tabId: TabId): void {
     setTimeout(() => {
-      if (this.gestureActive || this.tabStore.activeTabId !== tabId) {
+      if (!shouldCaptureStartPageThumbnailNow(this.gestureActive, this.addressHandoffActive) ||
+        this.tabStore.activeTabId !== tabId) {
         return;
       }
       const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find((item: BrowserTabRecord) => item.id === tabId);
