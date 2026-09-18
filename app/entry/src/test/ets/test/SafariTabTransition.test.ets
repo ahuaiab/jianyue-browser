@@ -193,5 +193,10 @@ export default function safariTabTransitionTest() {
       expect(shouldRenderAddressItem(2, 1, -80, 2)).assertFalse();
     });
 
+    it('does not render the committed address item while handoff owns its slot', 0, () => {
+      expect(shouldRenderAddressItem(0, 0, 0, 1, TabPreviewKind.EXISTING_TAB, true)).assertFalse();
+      expect(shouldRenderAddressItem(0, 0, 0, 1, TabPreviewKind.EXISTING_TAB, false)).assertTrue();
+    });
+
   });
 }

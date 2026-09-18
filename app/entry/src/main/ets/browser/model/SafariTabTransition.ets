@@ -156,10 +156,14 @@ export function shouldPrimeFinalTabPreview(activeIndex: number, tabCount: number
 
 /** Keep the idle strip clean while retaining one target during a horizontal drag. */
 export function shouldRenderAddressItem(index: number, activeIndex: number, dragX: number,
-  tabCount: number, previewKind: TabPreviewKind = TabPreviewKind.EXISTING_TAB): boolean {
+  tabCount: number, previewKind: TabPreviewKind = TabPreviewKind.EXISTING_TAB,
+  handoffOwnsAddressSlot: boolean = false): boolean {
   const count: number = Math.max(0, Math.trunc(finite(tabCount)));
   const item: number = Math.trunc(finite(index));
   const active: number = Math.trunc(finite(activeIndex));
+  if (handoffOwnsAddressSlot && item === active) {
+    return false;
+  }
   if (count <= 0 || active < 0 || active >= count || item === active) {
     return count > 0 && item === active;
   }

@@ -210,6 +210,14 @@ export struct AddressTabStrip {
     return this.handoffUsesPendingSlot() ? this.pendingItemIndex() : this.activeIndex;
   }
 
+  private handoffOwnsAddressSlot(): boolean {
+    // During the outgoing spring the handoff layer is mounted beside the
+    // pending plus, so the current tab must remain visible. Once the draft is
+    // committed, the handoff layer becomes the sole owner of the active slot
+    // until the plus-to-placeholder crossfade has finished.
+    return this.addressHandoffMounted && this.pendingTab === undefined;
+  }
+
   private touchPoint(event: TouchEvent): TouchObject | undefined {
     if (event.touches !== undefined && event.touches.length > 0) {
       return event.touches[0];
@@ -311,7 +319,7 @@ export struct AddressTabStrip {
       } else {
         ForEach(this.tabs, (tab: BrowserTabRecord, index: number) => {
           if (shouldRenderAddressItem(index, this.activeIndex, this.rawDragX,
-            this.tabs.length, this.previewKind)) {
+            this.tabs.length, this.previewKind, this.handoffOwnsAddressSlot())) {
             this.tabItem(tab, index);
           }
         }, (tab: BrowserTabRecord) => tab.id);
