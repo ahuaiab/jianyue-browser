@@ -3,6 +3,7 @@ import {
   shouldMountAddressTransitionLayer,
   shouldMountBottomBrowserBar,
   ADDRESS_SEARCH_BAR_STYLE,
+  TAB_OVERVIEW_CAPTION_HEIGHT,
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
   tabOverviewAddressLayerZIndex,
   tabOverviewBorderOwner,
@@ -149,6 +150,19 @@ export default function tabOverviewTransitionTest() {
       const expectedRootTop: number = frame.addressVisualTop -
         (ADDRESS_SEARCH_BAR_STYLE.height - frame.addressVisualHeight) / 2;
       expect(frame.addressTop.toFixed(6)).assertEqual(expectedRootTop.toFixed(6));
+    });
+
+    it('keeps the address row as tall as the card caption during final handoff', 0, () => {
+      const progress: number = 0.94;
+      const page: TabOverviewPageFrame = tabOverviewPageFrame(progress, 400, 800, 0, 0);
+      const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        progress, false, 400, 800, 104, page
+      );
+      expect(frame.addressVisualHeight.toFixed(6)).assertEqual(
+        TAB_OVERVIEW_CAPTION_HEIGHT.toFixed(6)
+      );
+      expect((frame.addressScaleY * ADDRESS_SEARCH_BAR_STYLE.height).toFixed(6))
+        .assertEqual(frame.addressVisualHeight.toFixed(6));
     });
 
     it('starts toolbar rebound only after the address leaves the bottom chrome', 0, () => {
@@ -309,8 +323,14 @@ export default function tabOverviewTransitionTest() {
       const middleBottom: number = (middle.captionLocalTop + middle.captionLocalHeight) * middle.scaleY;
       expect(earlyBottom.toFixed(6)).assertEqual(early.clipHeight.toFixed(6));
       expect(middleBottom.toFixed(6)).assertEqual(middle.clipHeight.toFixed(6));
-      expect(middle.captionLocalHeight * middle.scaleY < early.captionLocalHeight * early.scaleY).assertTrue();
-      expect(early.captionContentScale * early.scaleY > middle.captionContentScale * middle.scaleY).assertTrue();
+      expect((early.captionLocalHeight * early.scaleY).toFixed(6))
+        .assertEqual(TAB_OVERVIEW_CAPTION_HEIGHT.toFixed(6));
+      expect((middle.captionLocalHeight * middle.scaleY).toFixed(6))
+        .assertEqual(TAB_OVERVIEW_CAPTION_HEIGHT.toFixed(6));
+      expect((end.captionLocalHeight * end.scaleY).toFixed(6))
+        .assertEqual(TAB_OVERVIEW_CAPTION_HEIGHT.toFixed(6));
+      expect((early.captionContentScale * early.scaleY).toFixed(6)).assertEqual('1.000000');
+      expect((middle.captionContentScale * middle.scaleY).toFixed(6)).assertEqual('1.000000');
       expect((end.captionContentScale * end.scaleY).toFixed(6)).assertEqual('1.000000');
     });
 

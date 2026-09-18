@@ -706,6 +706,20 @@ export function tabOverviewChromeFrame(
   const scaleY: number = pageScaleY;
   const currentCardBottom: number = pageFrame.clipTop + pageFrame.clipHeight;
   const addressHeight: number = fullHeight * scaleY;
+  const addressHandoff: number = overviewSegmentProgress(
+    clampedProgress,
+    TAB_OVERVIEW_ADDRESS_HANDOFF_START_PROGRESS,
+    TAB_OVERVIEW_ADDRESS_HANDOFF_END_PROGRESS
+  );
+  // The card caption is a fixed 32vp screen-space row. During the final
+  // address handoff, morph the address row to that same height instead of
+  // letting the 44vp field remain smaller after page scaling completes.
+  const captionVisualHeight: number = TAB_OVERVIEW_CAPTION_HEIGHT;
+  const visualHeight: number = interpolateOverviewValue(
+    addressHeight,
+    captionVisualHeight,
+    addressHandoff
+  );
   const attachStart: number = tabOverviewAddressAttachStartProgress(
     height,
     fullTop,
@@ -722,7 +736,7 @@ export function tabOverviewChromeFrame(
     attachStart,
     attachEnd
   );
-  const attachedTop: number = currentCardBottom - addressHeight;
+  const attachedTop: number = currentCardBottom - visualHeight;
   const visualLeft: number = interpolateOverviewValue(
     fullLeft, targetLeft, clampedProgress
   );
@@ -732,7 +746,6 @@ export function tabOverviewChromeFrame(
   const visualWidth: number = interpolateOverviewValue(
     fullWidth, targetWidth, clampedProgress
   );
-  const visualHeight: number = addressHeight;
   const layoutWidth: number = Math.max(16, visualWidth / Math.max(0.01, scaleX) + 16);
   // The strip's active capsule is centered with an 8vp inset in its local box.
   // Compensate for ArkUI's center-based scale before placing that box.
@@ -741,7 +754,8 @@ export function tabOverviewChromeFrame(
   // field. Retaining the normal 56vp slot here leaves an empty scaled band
   // above/below the capsule and produces the oversized transient seen in the
   // overview screenshots.
-  const addressTop: number = visualTop - (fullHeight - fullHeight * scaleY) / 2;
+  const addressScaleY: number = visualHeight / Math.max(0.01, fullHeight);
+  const addressTop: number = visualTop - (fullHeight - visualHeight) / 2;
   const jellyProgress: number = closing
     ? overviewJellyProgress(clampedProgress, 0, TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS)
     : overviewJellyProgress(
@@ -768,11 +782,6 @@ export function tabOverviewChromeFrame(
     toolbarExitStart,
     toolbarExitEnd
   );
-  const addressHandoff: number = overviewSegmentProgress(
-    clampedProgress,
-    TAB_OVERVIEW_ADDRESS_HANDOFF_START_PROGRESS,
-    TAB_OVERVIEW_ADDRESS_HANDOFF_END_PROGRESS
-  );
   const addressOpacity: number = 1 - addressHandoff;
   const toolbarJellyAnchorOffset: number = toolbarJellyProgress * safeChromeHeight * 0.05;
   const toolbarOpacity: number = 1 - toolbarHideProgress;
@@ -783,7 +792,7 @@ export function tabOverviewChromeFrame(
     addressTop,
     addressWidth: layoutWidth,
     addressScaleX: scaleX,
-    addressScaleY: scaleY,
+    addressScaleY,
     addressOpacity,
     addressVisualLeft: visualLeft,
     addressVisualTop: visualTop,
@@ -863,9 +872,10 @@ export function tabOverviewPageFrame(
   const targetTranslateY: number = targetTop - viewportHeight * (1 - targetScale) / 2;
   const clipHeight: number = interpolateOverviewValue(viewportHeight, cardHeight, clampedProgress);
   // Keep the label inside the same scaled layer while pinning its rendered
-  // bottom edge to the current clip window. Its local height stays fixed, so
-  // it shrinks with the page instead of behaving like a detached overlay.
-  const captionLocalHeight: number = TAB_OVERVIEW_CAPTION_HEIGHT / targetScale;
+  // bottom edge to the current clip window. Resolve its local metrics from
+  // the current page scale so the visible title row stays the same 32vp as
+  // the settled card throughout the shrink.
+  const captionLocalHeight: number = TAB_OVERVIEW_CAPTION_HEIGHT / Math.max(0.01, scale);
   const captionLocalTop: number = Math.max(0, clipHeight / scale - captionLocalHeight);
   return {
     scaleX: scale,
@@ -884,6 +894,6 @@ export function tabOverviewPageFrame(
     captionOpacity: tabOverviewLiveCaptionOpacity(clampedProgress),
     captionLocalTop: captionLocalTop,
     captionLocalHeight: captionLocalHeight,
-    captionContentScale: 1 / targetScale
+    captionContentScale: 1 / Math.max(0.01, scale)
   };
 }
