@@ -510,9 +510,12 @@ export function tabOverviewCaptionLocalRadius(frame: TabOverviewPageFrame | unde
  * Screen-space choreography for the two pieces of browser chrome that must
  * remain visually related to the live page during the overview morph.
  *
- * `addressLeft`/`addressTop`/`addressWidth` describe the unscaled
- * AddressTabStrip layout box.  The visible capsule is exposed separately so
- * tests can assert that it lands on the same card width as the page frame.
+ * `addressLeft`/`addressTop`/`addressWidth` describe the transition layout
+ * box. `addressTop` is calculated for the compact 44vp root used while the
+ * capsule tracks the page; normal mode moves its 56vp touch slot 8vp upward
+ * before rendering the same visible capsule. The visible capsule is exposed
+ * separately so tests can assert that it lands on the same card width as the
+ * page frame.
  */
 export interface TabOverviewChromeFrame {
   addressLeft: number;
@@ -734,8 +737,11 @@ export function tabOverviewChromeFrame(
   // The strip's active capsule is centered with an 8vp inset in its local box.
   // Compensate for ArkUI's center-based scale before placing that box.
   const addressLeft: number = visualLeft - 8 * scaleX - layoutWidth * (1 - scaleX) / 2;
-  const addressTop: number = visualTop - (56 - 56 * scaleY) / 2 -
-    ADDRESS_SEARCH_BAR_TOP_PADDING * scaleY;
+  // During the morph the root must have the same 44vp height as the visible
+  // field. Retaining the normal 56vp slot here leaves an empty scaled band
+  // above/below the capsule and produces the oversized transient seen in the
+  // overview screenshots.
+  const addressTop: number = visualTop - (fullHeight - fullHeight * scaleY) / 2;
   const jellyProgress: number = closing
     ? overviewJellyProgress(clampedProgress, 0, TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS)
     : overviewJellyProgress(

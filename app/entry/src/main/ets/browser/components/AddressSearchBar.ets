@@ -22,7 +22,10 @@ import {
   placeholderForFocus,
   syncAddressDraft
 } from '../model/BrowserInteraction';
-import { SAFARI_ADDRESS_LOCK_SAFE_INSET_VP } from '../model/BrowserVisualMetrics';
+import {
+  SAFARI_ADDRESS_LOCK_SAFE_INSET_VP,
+  SAFARI_ADDRESS_ROW_HEIGHT_VP
+} from '../model/BrowserVisualMetrics';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
 
 export interface AddressSearchBarDownloadProps {
@@ -115,6 +118,8 @@ export struct AddressSearchBar {
   @Param editorActive: boolean = true;
   @Param editorClosing: boolean = false;
   @Param inputExpandProgress: number = 0;
+  /** Overview morphs the visible 44vp field without retaining the normal 56vp slot. */
+  @Param transitionCompact: boolean = false;
 
   @Local draftAddress: string = '';
   @Local pageMenuShown: boolean = false;
@@ -227,6 +232,14 @@ export struct AddressSearchBar {
 
   private isStartPage(): boolean {
     return this.address === 'about:blank';
+  }
+
+  private containerHeight(): number {
+    return this.transitionCompact ? ADDRESS_SEARCH_BAR_STYLE.height : SAFARI_ADDRESS_ROW_HEIGHT_VP;
+  }
+
+  private containerTopPadding(): number {
+    return this.transitionCompact ? 0 : ADDRESS_SEARCH_BAR_TOP_PADDING;
   }
 
   private beginLongPress(): void {
@@ -525,9 +538,9 @@ export struct AddressSearchBar {
     }
       .id(`bottom-address-search-bar-${this.inputIdentity}`)
       .width('100%')
-      .height(56)
-      .padding({ top: ADDRESS_SEARCH_BAR_TOP_PADDING,
-        bottom: 56 - ADDRESS_SEARCH_BAR_TOP_PADDING - ADDRESS_SEARCH_BAR_STYLE.height })
+      .height(this.containerHeight())
+      .padding({ top: this.containerTopPadding(),
+        bottom: this.containerHeight() - this.containerTopPadding() - ADDRESS_SEARCH_BAR_STYLE.height })
       .backgroundColor(Color.Transparent)
       .bindContextMenu(this.gestureEnabled && this.pageMenuShown, this.pageMenu, {
         onDisappear: () => this.dismissPageMenu()

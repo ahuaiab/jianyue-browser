@@ -2,6 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import {
   shouldMountAddressTransitionLayer,
   shouldMountBottomBrowserBar,
+  ADDRESS_SEARCH_BAR_STYLE,
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
   tabOverviewAddressLayerZIndex,
   tabOverviewBorderOwner,
@@ -138,6 +139,16 @@ export default function tabOverviewTransitionTest() {
       const addressBottom: number = frame.addressVisualTop + frame.addressVisualHeight;
       const cardBottom: number = page.clipTop + page.clipHeight;
       expect(Math.abs(addressBottom - cardBottom) <= 0.000001).assertTrue();
+    });
+
+    it('uses the scaled visible address height as the transition root height', 0, () => {
+      const page: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 0);
+      const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
+        0.5, false, 400, 800, 104, page
+      );
+      const expectedRootTop: number = frame.addressVisualTop -
+        (ADDRESS_SEARCH_BAR_STYLE.height - frame.addressVisualHeight) / 2;
+      expect(frame.addressTop.toFixed(6)).assertEqual(expectedRootTop.toFixed(6));
     });
 
     it('starts toolbar rebound only after the address leaves the bottom chrome', 0, () => {

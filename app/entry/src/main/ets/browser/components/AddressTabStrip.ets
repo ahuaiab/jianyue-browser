@@ -114,12 +114,21 @@ export struct AddressTabStrip {
       : this.overviewChromeFrame.addressWidth;
   }
 
+  private frameHeight(): number {
+    return this.overviewTransitionActive
+      ? ADDRESS_SEARCH_BAR_STYLE.height
+      : SAFARI_ADDRESS_ROW_HEIGHT_VP;
+  }
+
   private framePosition(): Position {
     return this.overviewChromeFrame === undefined
       ? { x: 0, y: 0 }
       : {
         x: this.overviewChromeFrame.addressLeft,
-        y: this.overviewChromeFrame.addressTop
+        // The model's top is the compact transition root. Normal mode keeps
+        // the 56vp touch slot and places its visible 44vp field 8vp below it.
+        y: this.overviewChromeFrame.addressTop -
+          (this.overviewTransitionActive ? 0 : ADDRESS_SEARCH_BAR_TOP_PADDING)
       };
   }
 
@@ -273,11 +282,12 @@ export struct AddressTabStrip {
       editorActive: index === this.activeIndex && this.addressEditing,
       editorClosing: index === this.activeIndex && this.barMode === 'collapsing',
       inputExpandProgress: index === this.activeIndex ? this.inputExpandProgress : 0,
-      onGestureCancel: index === this.activeIndex ? this.onGestureCancel : () => undefined
+      onGestureCancel: index === this.activeIndex ? this.onGestureCancel : () => undefined,
+      transitionCompact: this.overviewTransitionActive
     })
       .id(`address-tab-item-${tab.id}`)
       .width(this.itemWidth())
-      .height(SAFARI_ADDRESS_ROW_HEIGHT_VP)
+      .height(this.frameHeight())
       .position({ x: this.itemOffset(index), y: 0 })
       .opacity(this.itemOpacity(index))
       // An adjacent tab is a transient visual item. If the gesture commits or
@@ -369,7 +379,7 @@ export struct AddressTabStrip {
     }
       .id('address-tab-strip')
       .width(this.frameWidth())
-      .height(SAFARI_ADDRESS_ROW_HEIGHT_VP)
+      .height(this.frameHeight())
       .position(this.framePosition())
       .scale({ x: this.frameScaleX(), y: this.frameScaleY(), z: 1 })
       .translate({ x: 0, y: this.frameTranslateY(), z: 0 })
