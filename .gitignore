@@ -15,6 +15,7 @@ diagnosis/
 docs/superpowers/
 
 # Build and signing artifacts
+hap/
 *.hap
 *.hsp
 *.app
