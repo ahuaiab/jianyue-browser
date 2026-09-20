@@ -11,6 +11,7 @@ import { StartPageItem } from '../model/StartPageModels';
 import { TabPreviewKind as MotionPreviewKind } from '../model/TabGestureMotion';
 import {
   shouldPreferStableStartPageFrame,
+  shouldPreferHorizontalPreviewThumbnail,
   shouldRenderTabPreviewContent,
   TabTransitionSceneVisualState,
   tabTransitionSceneVisualState
@@ -20,10 +21,14 @@ import {
   tabOverviewCaptionLocalRadius,
   TabOverviewLivePageCloseFrame,
   tabOverviewLivePageCloseFrame,
-  TabOverviewPageFrame
+  tabOverviewLocalPageClipFrame,
+  TabOverviewLocalPageClipFrame,
+  TabOverviewPageFrame,
+  tabOverviewLivePageContentHeight,
+  tabOverviewLivePageContentTop,
+  tabOverviewTransitionViewportClipsOverflow
 } from '../model/TabOverviewActions';
 import { WebNodeHostController } from '../web/WebTabNode';
-import { availableContentHeight } from '../model/WindowAvoidance';
 
 /**
  * Native ArkUI page scene for Safari-style tab transitions.
@@ -44,6 +49,7 @@ export struct BrowserTransitionScene {
   @Param currentHost: WebNodeHostController | undefined = undefined;
   @Param previewHost: WebNodeHostController | undefined = undefined;
   @Param currentThumbnail: image.PixelMap | undefined = undefined;
+  @Param handoffThumbnail: image.PixelMap | undefined = undefined;
   @Param previewThumbnail: image.PixelMap | undefined = undefined;
   @Param currentIsStartPage: boolean = false;
   @Param previewIsStartPage: boolean = false;
@@ -96,7 +102,11 @@ export struct BrowserTransitionScene {
   }
 
   private pageContentHeight(): number {
-    return availableContentHeight(this.viewportHeight, this.topContentInset);
+    return tabOverviewLivePageContentHeight(
+      this.overviewFrame,
+      this.viewportHeight,
+      this.topContentInset
+    );
   }
 
   private backgroundViewportHeight(): number {
@@ -107,7 +117,7 @@ export struct BrowserTransitionScene {
   }
 
   private pageContentTop(): number {
-    return Number.isFinite(this.topContentInset) ? Math.max(0, this.topContentInset) : 0;
+    return tabOverviewLivePageContentTop(this.overviewFrame, this.topContentInset);
   }
 
   private sceneWidth(): number {
@@ -213,6 +223,13 @@ export struct BrowserTransitionScene {
     return this.hasPreviewContent();
   }
 
+  private shouldShowPreviewThumbnail(): boolean {
+    return shouldPreferHorizontalPreviewThumbnail(
+      this.showPreview,
+      this.previewThumbnail !== undefined
+    );
+  }
+
   @Builder
   private buildCurrentPageScene() {
     Stack() {
@@ -264,6 +281,15 @@ export struct BrowserTransitionScene {
           onBack: this.onBack
         });
       }
+      // Cover the short ArkWeb compositor gap while the settled target is
+      // reattached from the preview NodeContainer to the current one.
+      if (this.handoffThumbnail !== undefined) {
+        TopAlignedPixelMapImage({ source: this.handoffThumbnail })
+          .width('100%')
+          .height('100%')
+          .zIndex(1)
+          .hitTestBehavior(HitTestMode.None);
+      }
     }
       .id('transition-current-page-scene')
       // Keep the live page's layout viewport fixed while its native layer is
@@ -286,12 +312,15 @@ export struct BrowserTransitionScene {
           .height('100%')
           .clip(true)
           .hitTestBehavior(HitTestMode.None);
-      } else if (this.previewThumbnail !== undefined) {
+      }
+      if (this.previewThumbnail !== undefined &&
+        (this.previewHost === undefined || this.shouldShowPreviewThumbnail())) {
         TopAlignedPixelMapImage({ source: this.previewThumbnail })
           .width('100%')
           .height('100%')
+          .zIndex(1)
           .hitTestBehavior(HitTestMode.None);
-      } else if (this.previewIsStartPage) {
+      } else if (this.previewHost === undefined && this.previewIsStartPage) {
         StartPage({
           items: this.currentItems,
           settings: this.settings,
@@ -371,8 +400,10 @@ export struct BrowserTransitionScene {
       .width(this.sceneWidth())
       .height(this.sceneHeight())
       // Keep the full native page viewport as the layout surface. The
-      // surrounding clip shape crops it to the card without constraining or
-      // remeasuring the ArkWeb NodeContainer.
+      // local clip window crops its pixels to the card before the page layer
+      // scales. This is the native-surface-safe counterpart to the outer
+      // screen-space clip on browser-root-transition-scene.
+      .clipShape(this.overviewLocalClipShape())
       .scale({
         x: this.overviewScaleX(),
         y: this.overviewScaleY(),
@@ -393,6 +424,22 @@ export struct BrowserTransitionScene {
     }).position({
       x: this.overviewClipLeft(),
       y: this.overviewClipTop()
+    });
+  }
+
+  private overviewLocalClipShape(): RectShape {
+    const clip: TabOverviewLocalPageClipFrame = tabOverviewLocalPageClipFrame(
+      this.overviewFrame,
+      this.sceneWidth(),
+      this.sceneHeight()
+    );
+    return new RectShape({
+      width: clip.width,
+      height: clip.height,
+      radius: clip.cornerRadius
+    }).position({
+      x: clip.left,
+      y: clip.top
     });
   }
 
@@ -453,7 +500,17 @@ export struct BrowserTransitionScene {
       .id('browser-transition-viewport')
       .width('100%')
       .height('100%')
-      .onAreaChange((_oldValue, newValue) =>
-        this.onViewportChange(newValue.width as number, newValue.height as number));
+      // Keep the live page visually in front during the overview morph, but
+      // remove the full-window scene from hit testing so tab cards underneath
+      // can receive the selection tap.
+      .hitTestBehavior(this.interactionLocked ? HitTestMode.None : HitTestMode.Default)
+      // ArkWeb can retain its native surface bounds while an ancestor is
+      // transformed. The outer viewport must therefore clip overflow too;
+      // otherwise the reverse card expansion briefly paints above the system
+      // top avoid area before the identity frame restores the normal inset.
+      .clip(tabOverviewTransitionViewportClipsOverflow())
+      .onAreaChange((_oldValue, newValue) => {
+        this.onViewportChange(newValue.width as number, newValue.height as number);
+      });
   }
 }

@@ -93,8 +93,16 @@ export const TAB_OVERVIEW_LAYOUT: TabOverviewLayoutMetrics = {
  */
 export const TAB_OVERVIEW_GESTURE_CARD_HEIGHT: number = TAB_OVERVIEW_LAYOUT.cardHeight;
 
-/** Keep the card grid out of the foreground until the live page reaches its slot. */
-export const TAB_OVERVIEW_PAGE_HANDOFF_START_PROGRESS: number = 0.92;
+/**
+ * Reveal the rear cards as soon as the live page has visibly started shrinking.
+ * Keeping this before the final caption handoff lets the overview read as a
+ * stack of pages throughout the morph instead of a lone page that suddenly
+ * becomes a grid at the endpoint.
+ */
+export const TAB_OVERVIEW_PAGE_HANDOFF_START_PROGRESS: number = 0.35;
+
+/** Keep the rear cards legible on the very first non-zero shrink frame. */
+export const TAB_OVERVIEW_GRID_START_OPACITY: number = 0.28;
 
 /**
  * Transfer the selection ring with the grid during its final handoff. The
@@ -118,6 +126,9 @@ export const TAB_OVERVIEW_SPRING_MASS: number = 1;
 export const TAB_OVERVIEW_SPRING_STIFFNESS: number = 228;
 export const TAB_OVERVIEW_SPRING_DAMPING: number = 30;
 export const TAB_OVERVIEW_SPRING_MAX_NORMALIZED_VELOCITY: number = 3;
+
+/** Short, reversible handoff that removes the normal page's top safe area. */
+export const TAB_OVERVIEW_SAFE_INSET_HANDOFF_PROGRESS: number = 0.08;
 
 /** Case-insensitive title/URL search used by the tab overview search field. */
 export function filterTabsByQuery(tabs: BrowserTabRecord[], query: string): BrowserTabRecord[] {
@@ -232,15 +243,17 @@ export function tabOverviewActiveCardScrollOffset(
 }
 
 /**
- * Convert the live page's top avoid inset into the card's scaled coordinate.
- * BrowserTransitionScene applies this inset before the page-to-card scale;
- * static thumbnails need the same offset inside their card window.
+ * Keep every static thumbnail flush with the card's top edge.
+ *
+ * The grid's top spacer already owns the system avoid area. Applying that
+ * inset again inside a PixelMap translates the image down and leaves a white
+ * strip above inactive cards, while the active live-page card starts at the
+ * card edge. Static snapshots therefore use the same zero local offset as
+ * the live card; the parameters remain part of the helper's call contract so
+ * the card layout has one explicit policy for all preview types.
  */
-export function tabOverviewThumbnailTopOffset(topInset: number, viewportWidth: number): number {
-  if (!Number.isFinite(topInset) || !Number.isFinite(viewportWidth) || viewportWidth <= 0) {
-    return 0;
-  }
-  return Math.max(0, topInset) * tabOverviewCardWidth(viewportWidth) / viewportWidth;
+export function tabOverviewThumbnailTopOffset(_topInset: number, _viewportWidth: number): number {
+  return 0;
 }
 
 /**
@@ -326,9 +339,34 @@ export function tabOverviewHandoffProgress(progress: number): number {
     (1 - TAB_OVERVIEW_PAGE_HANDOFF_START_PROGRESS);
 }
 
-/** The grid is revealed only during the final live-page-to-card handoff. */
+/** Reveal the grid progressively while the live page is still shrinking. */
 export function tabOverviewGridOpacityAtProgress(progress: number, hasLivePage: boolean): number {
-  return hasLivePage ? tabOverviewHandoffProgress(progress) : 1;
+  if (!hasLivePage) {
+    return 1;
+  }
+  const clampedProgress: number = clampOverviewProgress(progress);
+  return TAB_OVERVIEW_GRID_START_OPACITY +
+    (1 - TAB_OVERVIEW_GRID_START_OPACITY) * clampedProgress;
+}
+
+/**
+ * Resolve the overview grid opacity for the transition direction.
+ *
+ * Entry keeps a small baseline opacity so rear cards are visible as soon as
+ * the live page starts shrinking. Reverse expansion has a different visual
+ * owner: the live page is already expanding from the selected card, so the
+ * grid must leave immediately instead of leaving translucent thumbnails over
+ * the desktop background.
+ */
+export function tabOverviewGridOpacityForTransition(
+  progress: number,
+  hasLivePage: boolean,
+  closing: boolean
+): number {
+  if (closing && hasLivePage) {
+    return 0;
+  }
+  return tabOverviewGridOpacityAtProgress(progress, hasLivePage);
 }
 
 /**
@@ -394,8 +432,10 @@ export function shouldUseTabOverviewCloseThumbnail(
 
 /**
  * The live page and its card shell must never paint the selection ring at the
- * same time.  The live page owns the ring while it is moving or expanding
- * back; the card shell takes ownership only after the overview has settled.
+ * same time. The live page is the foreground layer for the whole overview
+ * morph, so it remains the ring owner after reaching the card slot as well.
+ * The card shell is underneath the live page and its ring would otherwise be
+ * hidden in the settled frame.
  */
 export type TabOverviewBorderOwner = 'none' | 'live-page' | 'card';
 
@@ -407,17 +447,10 @@ export function tabOverviewBorderOwner(
   if (clampedProgress <= 0) {
     return 'none';
   }
-  // During reverse expansion the live page must keep ownership so its ring
-  // grows with the same frame as the page. During entry, hand ownership to
-  // the fixed card in the final grid handoff segment to avoid a taller live
-  // clip ring sitting outside the already-settled card bounds.
-  if (closing) {
-    return 'live-page';
-  }
-  if (clampedProgress < TAB_OVERVIEW_BORDER_HANDOFF_PROGRESS) {
-    return 'live-page';
-  }
-  return 'card';
+  // The live page outline is rendered after its page content inside the
+  // foreground scene. Keep ownership through both settled entry and reverse
+  // expansion so the selected ring cannot be occluded by the lower grid.
+  return 'live-page';
 }
 
 /**
@@ -471,6 +504,8 @@ export function tabOverviewSpringEasing(
  * exactly the same visual target without moving or remounting the WebView.
  */
 export interface TabOverviewPageFrame {
+  /** Shared 0..1 morph progress used by layout helpers without inferring it from scale. */
+  transitionProgress: number;
   scaleX: number;
   scaleY: number;
   translateX: number;
@@ -489,6 +524,116 @@ export interface TabOverviewPageFrame {
   captionLocalHeight: number;
   /** Local metric multiplier that resolves to 1 after the parent reaches its target scale. */
   captionContentScale: number;
+}
+
+/**
+ * Local clip window for the full-size page layer before its overview scale.
+ * The page layer scales around its center, so a screen-space card rectangle
+ * must be inverse-transformed before it can clip the native page contents.
+ */
+export interface TabOverviewLocalPageClipFrame {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cornerRadius: number;
+}
+
+export function tabOverviewLocalPageClipFrame(
+  frame: TabOverviewPageFrame | undefined,
+  viewportWidth: number,
+  viewportHeight: number
+): TabOverviewLocalPageClipFrame {
+  const safeWidth: number = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : 1;
+  const safeHeight: number = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 1;
+  if (frame === undefined) {
+    return { left: 0, top: 0, width: safeWidth, height: safeHeight, cornerRadius: 0 };
+  }
+  const scaleX: number = Number.isFinite(frame.scaleX) && Math.abs(frame.scaleX) > 0.01
+    ? Math.abs(frame.scaleX) : 1;
+  const scaleY: number = Number.isFinite(frame.scaleY) && Math.abs(frame.scaleY) > 0.01
+    ? Math.abs(frame.scaleY) : 1;
+  const translateX: number = Number.isFinite(frame.translateX) ? frame.translateX : 0;
+  const translateY: number = Number.isFinite(frame.translateY) ? frame.translateY : 0;
+  const clipLeft: number = Number.isFinite(frame.clipLeft) ? frame.clipLeft : 0;
+  const clipTop: number = Number.isFinite(frame.clipTop) ? frame.clipTop : 0;
+  const clipWidth: number = Number.isFinite(frame.clipWidth) && frame.clipWidth > 0
+    ? frame.clipWidth : safeWidth;
+  const clipHeight: number = Number.isFinite(frame.clipHeight) && frame.clipHeight > 0
+    ? frame.clipHeight : safeHeight;
+  const localLeft: number = safeWidth / 2 +
+    (clipLeft - translateX - safeWidth / 2) / scaleX;
+  const localTop: number = safeHeight / 2 +
+    (clipTop - translateY - safeHeight / 2) / scaleY;
+  const localRadius: number = Number.isFinite(frame.cornerRadius)
+    ? Math.max(0, frame.cornerRadius) / Math.min(scaleX, scaleY) : 0;
+  return {
+    left: localLeft,
+    top: localTop,
+    width: Math.max(1, clipWidth / scaleX),
+    height: Math.max(1, clipHeight / scaleY),
+    cornerRadius: localRadius
+  };
+}
+
+/**
+ * Resolve the page scene's top inset for the current transform.
+ *
+ * The normal page is laid out below the system avoid area. During the
+ * overview morph, however, the page is already positioned inside the card's
+ * transformed coordinate space. Applying the same inset to NodeContainer a
+ * second time leaves a visible gap between the blue card outline and the
+ * page image. Keep the normal inset at the identity frame, then hand it off
+ * over a short smooth segment so the transformed frame owns the complete
+ * page viewport without a first-frame jump. The grid and card frame already
+ * own the safe-area spacing; retaining it after the handoff would scale a
+ * white strip into the card's top edge.
+ */
+export function tabOverviewLivePageContentTop(
+  frame: TabOverviewPageFrame | undefined,
+  normalTopInset: number
+): number {
+  const safeInset: number = Number.isFinite(normalTopInset) ? Math.max(0, normalTopInset) : 0;
+  if (frame === undefined) {
+    return safeInset;
+  }
+  const progress: number = clampOverviewProgress(frame.transitionProgress);
+  if (progress <= 0 || safeInset <= 0) {
+    return safeInset;
+  }
+  const handoff: number = Math.min(1, progress / TAB_OVERVIEW_SAFE_INSET_HANDOFF_PROGRESS);
+  // Smoothstep keeps both the first frame and the zero-inset endpoint
+  // velocity-neutral, so reverse expansion does not visibly spring at either
+  // end of the safe-area handoff.
+  const eased: number = handoff * handoff * (3 - 2 * handoff);
+  return safeInset * (1 - eased);
+}
+
+/**
+ * Keep the page layout viewport stable while it is transformed. Resizing the
+ * start page changes its Cover crop and makes the wallpaper visibly shift as
+ * reverse expansion reaches the identity frame.
+ */
+export function tabOverviewLivePageContentHeight(
+  _frame: TabOverviewPageFrame | undefined,
+  viewportHeight: number,
+  normalTopInset: number
+): number {
+  const safeHeight: number = Number.isFinite(viewportHeight) && viewportHeight > 0
+    ? viewportHeight
+    : 1;
+  const safeInset: number = Number.isFinite(normalTopInset) ? Math.max(0, normalTopInset) : 0;
+  return Math.max(1, safeHeight - safeInset);
+}
+
+/**
+ * The transformed page is backed by a native ArkWeb surface. Keep the outer
+ * transition viewport as a hard paint boundary so reverse expansion cannot
+ * leak page pixels into the status-bar avoid area before the identity frame
+ * restores the normal top inset.
+ */
+export function tabOverviewTransitionViewportClipsOverflow(): boolean {
+  return true;
 }
 
 /**
@@ -567,24 +712,62 @@ export function tabOverviewAddressLayerZIndex(): number {
 }
 
 /**
- * During reverse expansion the live page sits above the overview cards at
- * z-index 20. Put the returning toolbar above that page, while keeping the
- * shared address capsule above both layers.
+ * The live page sits above the overview cards at z-index 20 in both
+ * directions. Keep the fixed toolbar/bottom bar above that page as well, so
+ * the page background cannot cover the chrome while the transition is running;
+ * the shared address capsule remains above both layers at z-index 40.
  */
 export function tabOverviewBottomChromeZIndex(closing: boolean): number {
-  return closing ? 25 : 10;
+  return 25;
+}
+
+/**
+ * Do not revoke hit testing from the bottom chrome while its vertical pan is
+ * still active. Changing the gesture owner's parent to HitTestMode.None on
+ * the first non-zero overview frame prevents ArkUI from delivering the final
+ * action-end/cancel callback and strands the shared progress mid-transition.
+ */
+export function shouldDisableBottomChromeHitTesting(
+  overviewProgress: number,
+  gestureInProgress: boolean,
+  overviewClosing: boolean
+): boolean {
+  if (overviewClosing) {
+    return true;
+  }
+  return clampOverviewProgress(overviewProgress) > 0 && !gestureInProgress;
+}
+
+/**
+ * Keep the selected live page above the overview grid in both directions.
+ * Relying on declaration order is not enough when the native NodeContainer
+ * participates in compositing; the current page must own the foreground
+ * pixels while the rear cards remain visible around it.
+ */
+export function tabOverviewGridZIndex(): number {
+  return 15;
+}
+
+/**
+ * The selected page owns the foreground for entry and reverse dismissal.
+ * Keeping one value avoids a one-frame layer swap when the direction changes.
+ */
+export function tabOverviewLivePageZIndex(_closing: boolean): number {
+  return 20;
+}
+
+/**
+ * The live page remains visually above the overview cards, but it must leave
+ * the hit-test chain as soon as the overview starts so card taps reach Grid.
+ */
+export function shouldDisableTabOverviewLivePageHitTesting(progress: number): boolean {
+  return clampOverviewProgress(progress) > 0;
 }
 
 /** Short screen-space handoff after the card bottom reaches the address row. */
 export const TAB_OVERVIEW_ADDRESS_ATTACH_DURATION_PROGRESS: number = 0.08;
-/** Address-only jelly remains independent from the toolbar exit handoff. */
-export const TAB_OVERVIEW_ADDRESS_JELLY_START_PROGRESS: number = 0.22;
-export const TAB_OVERVIEW_ADDRESS_JELLY_END_PROGRESS: number = 0.44;
-/** The bottom toolbar leaves in one short rebound after its dynamic exit point. */
+/** The bottom toolbar leaves in one short, monotonic handoff after its exit point. */
 export const TAB_OVERVIEW_TOOLBAR_HIDE_DURATION_PROGRESS: number = 0.20;
-
-/** Reverse expansion keeps the toolbar below the page until the address rejoins. */
-export const TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS: number = 0.18;
 
 /** Handoff the transient address capsule to the settled card caption. */
 export const TAB_OVERVIEW_ADDRESS_HANDOFF_START_PROGRESS: number = 0.82;
@@ -597,12 +780,6 @@ function overviewSegmentProgress(progress: number, start: number, end: number): 
     return progress >= end ? 1 : 0;
   }
   return Math.max(0, Math.min(1, (progress - start) / (end - start)));
-}
-
-/** A bounded bell keeps the jelly directly driven by the shared progress. */
-function overviewJellyProgress(progress: number, start: number, end: number): number {
-  const segment: number = overviewSegmentProgress(progress, start, end);
-  return Math.sin(Math.PI * segment);
 }
 
 /**
@@ -756,13 +933,6 @@ export function tabOverviewChromeFrame(
   // overview screenshots.
   const addressScaleY: number = visualHeight / Math.max(0.01, fullHeight);
   const addressTop: number = visualTop - (fullHeight - visualHeight) / 2;
-  const jellyProgress: number = closing
-    ? overviewJellyProgress(clampedProgress, 0, TAB_OVERVIEW_ADDRESS_RETURN_JELLY_END_PROGRESS)
-    : overviewJellyProgress(
-      clampedProgress,
-      TAB_OVERVIEW_ADDRESS_JELLY_START_PROGRESS,
-      TAB_OVERVIEW_ADDRESS_JELLY_END_PROGRESS
-    );
   const toolbarExitStart: number = tabOverviewToolbarExitProgress(
     height,
     safeChromeHeight,
@@ -777,16 +947,9 @@ export function tabOverviewChromeFrame(
     toolbarExitStart,
     toolbarExitEnd
   );
-  const toolbarJellyProgress: number = overviewJellyProgress(
-    clampedProgress,
-    toolbarExitStart,
-    toolbarExitEnd
-  );
   const addressOpacity: number = 1 - addressHandoff;
-  const toolbarJellyAnchorOffset: number = toolbarJellyProgress * safeChromeHeight * 0.05;
   const toolbarOpacity: number = 1 - toolbarHideProgress;
-  const toolbarTranslateY: number = safeChromeHeight * toolbarHideProgress -
-    toolbarJellyAnchorOffset;
+  const toolbarTranslateY: number = safeChromeHeight * toolbarHideProgress;
   return {
     addressLeft,
     addressTop,
@@ -798,14 +961,16 @@ export function tabOverviewChromeFrame(
     addressVisualTop: visualTop,
     addressVisualWidth: visualWidth,
     addressVisualHeight: visualHeight,
-    addressJellyScaleX: 1 + jellyProgress * (closing ? 0.05 : 0.032),
-    addressJellyScaleY: 1 - jellyProgress * (closing ? 0.12 : 0.08),
-    addressJellyTranslateY: -jellyProgress * (closing ? 4 : 3),
+    // Keep the address and toolbar on the shared geometry track. The former
+    // bell-shaped jelly pass caused a visible rebound at both ends of the
+    // overview transition, especially while reversing the gesture.
+    addressJellyScaleX: 1,
+    addressJellyScaleY: 1,
+    addressJellyTranslateY: 0,
     toolbarOpacity,
     toolbarTranslateY,
-    toolbarScaleX: 1 + toolbarJellyProgress * 0.04,
-    // Keep the bottom edge visually anchored while the top edge stretches up.
-    toolbarScaleY: 1 + toolbarJellyProgress * 0.10
+    toolbarScaleX: 1,
+    toolbarScaleY: 1
   };
 }
 
@@ -831,6 +996,7 @@ export function tabOverviewPageFrame(
   activeCardScrollOffset: number = 0
 ): TabOverviewPageFrame {
   const identity: TabOverviewPageFrame = {
+    transitionProgress: 0,
     scaleX: 1,
     scaleY: 1,
     translateX: 0,
@@ -878,6 +1044,7 @@ export function tabOverviewPageFrame(
   const captionLocalHeight: number = TAB_OVERVIEW_CAPTION_HEIGHT / Math.max(0.01, scale);
   const captionLocalTop: number = Math.max(0, clipHeight / scale - captionLocalHeight);
   return {
+    transitionProgress: clampedProgress,
     scaleX: scale,
     scaleY: scale,
     translateX: interpolateOverviewValue(0, targetTranslateX, clampedProgress),

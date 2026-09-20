@@ -207,9 +207,11 @@ export function tabGestureMotion(
   if (horizontal > 0 && !hasPrevious) {
     const pull: number = rubberBandDistance(horizontal);
     base.displayDragX = pull;
-    base.pageTranslateX = pull * 0.6;
-    // The fixed bottom action row remains stationary; the moving root scene
-    // uses the authoritative raw drag for both page and address-bar layers.
+    // There is no target scene beyond the leading edge. Keep the page as the
+    // sole viewport pixel owner and apply resistance only to address chrome;
+    // translating the page here exposes the window background as a white
+    // strip and then produces a second compositor rebound on release.
+    base.pageTranslateX = 0;
     base.transitionProgress = clamp(Math.abs(pull) / TAB_RUBBER_BAND_MAX_PULL);
     base.overscrollProgress = clamp(Math.abs(pull) / TAB_RUBBER_BAND_MAX_PULL);
     return base;

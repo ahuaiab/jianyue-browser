@@ -12,7 +12,7 @@ import {
   TAB_SEARCH_PULL_THRESHOLD,
   TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
   tabOverviewBorderOwner,
-  tabOverviewGridOpacityAtProgress,
+  tabOverviewGridOpacityForTransition,
   tabOverviewActiveCardScrollOffset,
   tabOverviewGridMaxScrollOffset,
   tabOverviewSearchSlotHeightForProgress,
@@ -226,7 +226,11 @@ export struct TabOverview {
       return 1;
     }
     if (this.livePageTransform) {
-      return tabOverviewGridOpacityAtProgress(this.overviewProgress, true);
+      return tabOverviewGridOpacityForTransition(
+        this.overviewProgress,
+        true,
+        this.overviewClosing
+      );
     }
     return this.interactiveReveal ? this.overviewProgress : 1;
   }

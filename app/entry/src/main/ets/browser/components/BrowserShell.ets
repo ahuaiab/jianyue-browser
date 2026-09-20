@@ -78,6 +78,8 @@ import {
   startPageThumbnailMatchesBackground
 } from '../model/StartPageModels';
 import {
+  shouldDisableBottomChromeHitTesting,
+  shouldDisableTabOverviewLivePageHitTesting,
   shouldMountAddressTransitionLayer,
   shouldMountBottomBrowserBar,
   shouldUseTabOverviewCloseThumbnail,
@@ -89,7 +91,9 @@ import {
   tabOverviewCaptionHandoffOpacity,
   tabOverviewCardWidth,
   tabOverviewChromeFrame,
+  tabOverviewGridZIndex,
   tabOverviewGridMaxScrollOffset,
+  tabOverviewLivePageZIndex,
   TabOverviewChromeFrame,
   tabOverviewPageFrame,
   TabOverviewPageFrame,
@@ -137,7 +141,9 @@ import {
   shouldRefreshHostsForViewport,
   shouldRetryTabSnapshot,
   shouldWaitForOverviewClose,
-  shouldWaitForTabOverviewSnapshot
+  shouldWaitForTabOverviewSnapshot,
+  shouldDeferTabOverviewSnapshotRevision,
+  shouldUpdateTransitionSystemBar
 } from '../model/BrowserInteraction';
 import {
   emptyTabGestureMotion,
@@ -152,7 +158,8 @@ import {
   safariTransitionFrame,
   shouldPrimeFinalTabPreview,
   shouldCaptureStartPageThumbnailNow,
-  shouldRenderPendingTabPreview
+  shouldRenderPendingTabPreview,
+  shouldShowHorizontalTabHandoff
 } from '../model/SafariTabTransition';
 import { TouchOwner } from '../gesture/TouchOwnership';
 import {
@@ -193,6 +200,7 @@ const ENABLE_GESTURE_LAB: boolean = false;
 const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
 const TAB_SNAPSHOT_RETRY_DELAYS_MS: number[] = [120, 280, 640];
+const HORIZONTAL_TAB_HANDOFF_DURATION_MS: number = 280;
 const DOWNLOAD_RECORDS_KEY: string = 'downloads.v1';
 let sharedDownloadService: DownloadService | undefined = undefined;
 let sharedDownloadFilesDir: string = '';
@@ -670,10 +678,15 @@ export struct BrowserShell {
   // Render-only tab gesture state. The committed tab index remains in
   // TabStore until a spring transition finishes.
   @Local rawDragX: number = 0;
+  @Local displayDragX: number = 0;
   @Local pageTranslateX: number = 0;
   @Local adjacentTranslateX: number = 0;
   @Local transitionProgress: number = 0;
   @Local newTabProgress: number = 0;
+  // PixelMap cover for the one-frame ArkWeb surface reattachment after a
+  // settled horizontal tab switch.
+  @Local horizontalHandoffFrame: image.PixelMap | undefined = undefined;
+  private horizontalHandoffToken: number = 0;
   // Native capsule handoff used only after the edge-created tab is published.
   // 0 keeps the plus visible; 1 leaves the normal native placeholder visible.
   @Local addressHandoffActive: boolean = false;
@@ -705,6 +718,16 @@ export struct BrowserShell {
   // turn.
   @Local addressFocusRequestToken: number = 0;
   @Local cardRevision: number = 0;
+  // Window system-bar state is global compositor state. Keep the requested
+  // value outside the frame-driven ArkUI state so identical writes are
+  // suppressed during the overview drag.
+  private transitionStatusBarOpaque: boolean = false;
+  private transitionStatusBarRequestToken: number = 0;
+  // Snapshot callbacks may finish while the overview is animating. The
+  // thumbnail map can update privately, but the Grid gets one revision after
+  // the native animator releases the shared frame transaction.
+  private snapshotRevisionPending: boolean = false;
+  private overviewSnapshotPrimed: boolean = false;
   // Explicitly invalidates the retained transition scene after a tab is
   // activated or created. This prevents the overview's active card and the
   // underlying page node from diverging after the overview closes.
@@ -1263,6 +1286,62 @@ export struct BrowserShell {
     });
   }
 
+  /**
+   * ArkWeb may briefly composite beyond its ArkUI ancestor during the card
+   * expansion. An opaque status-bar backing is the window-level boundary that
+   * remains effective for that native surface; restore the immersive color
+   * only after the reverse transition reaches the identity frame.
+   */
+  private setTransitionStatusBarOpaque(opaque: boolean): void {
+    if (this.mainWindow === undefined ||
+      !shouldUpdateTransitionSystemBar(this.transitionStatusBarOpaque, opaque)) {
+      return;
+    }
+    this.transitionStatusBarOpaque = opaque;
+    const requestToken: number = this.transitionStatusBarRequestToken + 1;
+    this.transitionStatusBarRequestToken = requestToken;
+    void this.mainWindow.setWindowSystemBarProperties({
+      statusBarColor: opaque ? '#FFFFFFFF' : '#00000000',
+      statusBarContentColor: '#FF1D1D1F',
+      navigationBarColor: '#00000000',
+      navigationBarContentColor: '#FF1D1D1F',
+      isStatusBarLightIcon: false,
+      isNavigationBarLightIcon: false
+    }).catch(() => {
+      if (requestToken === this.transitionStatusBarRequestToken) {
+        this.transitionStatusBarOpaque = !opaque;
+      }
+    });
+  }
+
+  private publishSnapshotRevision(): void {
+    if (shouldDeferTabOverviewSnapshotRevision(
+      this.overviewProgress,
+      this.overviewClosing,
+      this.overviewAnimationClosing
+    )) {
+      this.snapshotRevisionPending = true;
+      return;
+    }
+    this.cardRevision += 1;
+  }
+
+  private flushSnapshotRevision(): void {
+    if (!this.snapshotRevisionPending) {
+      return;
+    }
+    this.snapshotRevisionPending = false;
+    this.cardRevision += 1;
+  }
+
+  private primeOverviewSnapshots(): void {
+    if (this.overviewSnapshotPrimed) {
+      return;
+    }
+    this.overviewSnapshotPrimed = true;
+    this.requestTabSnapshots();
+  }
+
   private activeTab(): BrowserTabRecord | undefined {
     return this.tabStore.tabs.find((tab: BrowserTabRecord) => tab.id === this.tabStore.activeTabId);
   }
@@ -1608,6 +1687,7 @@ export struct BrowserShell {
 
   private applyTabGestureMotion(state: TabGestureMotionState): void {
     this.rawDragX = state.rawDragX;
+    this.displayDragX = state.displayDragX;
     this.pageTranslateX = state.pageTranslateX;
     this.adjacentTranslateX = state.adjacentTranslateX;
     this.transitionProgress = state.transitionProgress;
@@ -1626,8 +1706,8 @@ export struct BrowserShell {
     }
   }
 
-  private rawDragXForRender(): number {
-    return tabGestureOffsetForRender(this.rawDragX, this.gestureActive);
+  private displayDragXForRender(): number {
+    return tabGestureOffsetForRender(this.displayDragX, this.gestureActive);
   }
 
   private pageTranslateXForRender(): number {
@@ -1652,6 +1732,7 @@ export struct BrowserShell {
     this.addressHandoffAnimator = undefined;
     this.addressHandoffActive = false;
     this.addressHandoffProgress = 1;
+    this.invalidateHorizontalTabHandoff();
     this.pendingTabDraft = undefined;
     this.gestureActive = false;
     this.resetTabGestureMotion(false);
@@ -2783,6 +2864,7 @@ export struct BrowserShell {
       }
     }, () => {
       this.rawDragX = -this.viewportWidth;
+      this.displayDragX = -this.viewportWidth;
       this.pageTranslateX = -this.viewportWidth;
       this.adjacentTranslateX = 0;
       this.transitionProgress = 1;
@@ -2833,6 +2915,7 @@ export struct BrowserShell {
       (tab: BrowserTabRecord) => tab.id === newTabId
     );
     this.rawDragX = 0;
+    this.displayDragX = 0;
     this.gestureActive = false;
     this.resetTabGestureMotion(false);
     this.pendingTabDraft = undefined;
@@ -3486,6 +3569,7 @@ export struct BrowserShell {
     if (isOverviewSettled(this.overviewProgress)) {
       return;
     }
+    this.setTransitionStatusBarOpaque(true);
     const openToken: number = this.overviewOpenToken + 1;
     this.overviewOpenToken = openToken;
     this.overviewSearchProgress = 0;
@@ -3518,7 +3602,7 @@ export struct BrowserShell {
       this.thumbnailFor(currentTabId) !== undefined,
       'overview-opened-existing-tabs'
     );
-    this.requestTabSnapshots();
+    this.primeOverviewSnapshots();
     // Do not expose the native ArkWeb surface to a horizontal card-close
     // gesture before a PixelMap is ready. ArkWeb may ignore the ancestor
     // transform used by the shared page scene, which otherwise makes the
@@ -3610,6 +3694,7 @@ export struct BrowserShell {
       this.overviewSearchProgress = 0;
       this.overviewClosing = false;
       this.overviewAnimationClosing = false;
+      this.overviewSnapshotPrimed = false;
       // Keep the selected card as the visual scene until the reverse spring
       // has finished. Committing TabStore here would publish a new page and a
       // new address capsule one render turn before the shared morph ends.
@@ -3875,6 +3960,56 @@ export struct BrowserShell {
     this.syncFrequentSites(this.historyItems);
   }
 
+  private invalidateHorizontalTabHandoff(): void {
+    this.horizontalHandoffToken += 1;
+    this.horizontalHandoffFrame = undefined;
+  }
+
+  private publishHorizontalTabHandoffFrame(
+    frame: image.PixelMap | undefined,
+    targetId: TabId
+  ): void {
+    const token: number = this.horizontalHandoffToken + 1;
+    this.horizontalHandoffToken = token;
+    this.horizontalHandoffFrame = frame;
+    hilog.info(
+      BROWSER_WEB_DOMAIN,
+      BROWSER_WEB_TAG,
+      'phase=horizontal-handoff frame=%{public}s targetId=%{public}s',
+      frame === undefined ? 'missing' : 'captured',
+      targetId
+    );
+    if (frame === undefined) {
+      return;
+    }
+    setTimeout(() => {
+      if (this.horizontalHandoffToken === token) {
+        this.horizontalHandoffFrame = undefined;
+      }
+    }, HORIZONTAL_TAB_HANDOFF_DURATION_MS);
+  }
+
+  private async captureHorizontalTabHandoffFrame(
+    tabId: TabId
+  ): Promise<image.PixelMap | undefined> {
+    try {
+      return await this.getUIContext().getComponentSnapshot().get(`transition-preview-web-${tabId}`, {
+        scale: 1,
+        waitUntilRenderFinished: false
+      });
+    } catch (_error) {
+      const cached: image.PixelMap | undefined = this.thumbnailFor(tabId);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const controller: webview.WebviewController | undefined = this.runtimePort?.controllerFor(tabId);
+      if (controller === undefined) {
+        return undefined;
+      }
+      return await this.captureArkWebSnapshot(tabId, controller);
+    }
+  }
+
   private async captureMountedSnapshot(tabId: TabId): Promise<image.PixelMap | undefined> {
     const snapshot = this.getUIContext().getComponentSnapshot();
     try {
@@ -4125,7 +4260,7 @@ export struct BrowserShell {
           this.startPageThumbnailBackgroundId = this.startPageBackgroundKey();
         }
         this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
-        this.cardRevision += 1;
+        this.publishSnapshotRevision();
       }
     } finally {
       this.snapshotInFlight.delete(tabId);
@@ -4157,7 +4292,7 @@ export struct BrowserShell {
       this.startPageThumbnailBackgroundId = capturedBackgroundId;
       this.thumbnails.set(tabId, pixel);
       this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
-      this.cardRevision += 1;
+      this.publishSnapshotRevision();
     } finally {
       this.startPageSnapshotInFlight.delete(tabId);
     }
@@ -4347,6 +4482,7 @@ export struct BrowserShell {
     if (targetTab === undefined) {
       return;
     }
+    this.setTransitionStatusBarOpaque(true);
     const currentIndexBefore: number = this.activeTabIndex();
     const currentTabIdBefore: TabId = this.tabStore.activeTabId;
     const currentUrlBefore: string = this.activeAddress();
@@ -4489,7 +4625,9 @@ export struct BrowserShell {
     cancel: boolean = false,
     sample?: GestureSample
   ): void {
-    const rawX: number = sample?.dx ?? this.rawDragX;
+    // Diagnostics must describe the frame ArkUI is rendering, not a raw
+    // pointer sample that may already have been classified as vertical.
+    const rawX: number = this.rawDragX;
     const velocityX: number = sample?.velocityX ?? this.lastGestureVelocityX;
     const activeIndex: number = this.activeTabIndex();
     const frame = safariTransitionFrame(
@@ -4527,7 +4665,7 @@ export struct BrowserShell {
       asText(rawX / Math.max(1, this.viewportWidth)),
       String(activeIndex),
       String(frame.targetIndex),
-      String(this.previewKind),
+      String(frame.previewKind),
       pendingTabId,
       asText(frame.currentPageX),
       asText(frame.targetPageX),
@@ -4538,8 +4676,8 @@ export struct BrowserShell {
       cancel ? 'true' : 'false',
       String(this.tabStore.tabs.length),
       this.runtimePort?.controllerIdFor(this.tabStore.activeTabId) ?? '',
-      frame.previewKind === TabPreviewKind.EXISTING_TAB && this.previewIndex >= 0
-        ? this.runtimePort?.controllerIdFor(this.tabStore.tabs[this.previewIndex]?.id ?? '') ?? ''
+      frame.previewKind === TabPreviewKind.EXISTING_TAB && frame.targetIndex >= 0
+        ? this.runtimePort?.controllerIdFor(this.tabStore.tabs[frame.targetIndex]?.id ?? '') ?? ''
         : '',
       this.touchOwner,
       this.touchHitTestMode,
@@ -4576,6 +4714,7 @@ export struct BrowserShell {
     if (this.gestureActive || this.gestureState !== TabGestureState.IDLE) {
       return;
     }
+    this.invalidateHorizontalTabHandoff();
     if (shouldPrimeFinalTabPreview(this.activeTabIndex(), this.tabStore.tabs.length) &&
       this.pendingTabDraft === undefined && this.dispatcher !== undefined) {
       this.pendingTabDraft = this.dispatcher.reserveTab('about:blank', false);
@@ -4583,7 +4722,7 @@ export struct BrowserShell {
     // Prime every existing tab while the current page is still stationary.
     // ArkWeb's webPageSnapshot callback is asynchronous; starting it only
     // after gestureActive=true makes the target preview miss its frame.
-    this.requestTabSnapshots();
+    this.primeOverviewSnapshots();
     this.gestureStartIndex = this.activeTabIndex();
     this.addressTransitionToken += 1;
     this.addressGestureEngine.begin();
@@ -4612,11 +4751,12 @@ export struct BrowserShell {
     );
     if (decision.axis === GestureAxis.VERTICAL) {
       this.gestureState = TabGestureState.DRAGGING;
+      this.setTransitionStatusBarOpaque(true);
       this.overviewProgress = decision.progress;
       // The upward reveal is a vertical page-to-overview transition. Do not
-      // carry diagonal finger drift into rawDragX: AddressTabStrip uses that
-      // value for horizontal tab placement, which would make the capsule
-      // slide sideways while it should stay pinned to the page bottom.
+      // carry diagonal finger drift into the horizontal display track:
+      // AddressTabStrip consumes displayDragX for tab placement, which would
+      // make the capsule slide sideways while it should stay pinned.
       this.applyTabGestureMotion(verticalOverviewGestureMotion());
     } else if (decision.axis === GestureAxis.HORIZONTAL) {
       this.gestureState = TabGestureState.DRAGGING;
@@ -4641,9 +4781,6 @@ export struct BrowserShell {
     durationMs: number = BROWSER_OVERVIEW_TRANSITION_DURATION_MS,
     releaseVelocityY: number = 0
   ): void {
-    if (progress > 0.5) {
-      this.requestTabSnapshots();
-    }
     const animationToken: number = this.overviewAnimationToken + 1;
     this.overviewAnimationToken = animationToken;
     this.cancelOverviewReleaseAnimation();
@@ -4656,7 +4793,11 @@ export struct BrowserShell {
         return;
       }
       this.overviewAnimationClosing = false;
+      if (progress === 0) {
+        this.setTransitionStatusBarOpaque(false);
+      }
       onFinish();
+      this.flushSnapshotRevision();
     };
     if (durationMs <= 0) {
       this.overviewProgress = progress;
@@ -4764,6 +4905,8 @@ export struct BrowserShell {
           this.addressTransitionToken += 1;
           this.resetTabGestureMotion(false);
           this.gestureActive = false;
+          this.overviewSnapshotPrimed = false;
+          this.flushSnapshotRevision();
           this.logAddressGestureState('cancel-complete', false, true);
         }
       }
@@ -4771,6 +4914,7 @@ export struct BrowserShell {
       // Keep both scenes mounted for the whole spring transaction. The
       // preview leaves the clipped viewport only when the animation finishes.
       this.rawDragX = 0;
+      this.displayDragX = 0;
       this.pageTranslateX = 0;
       this.adjacentTranslateX = returnPreviewX;
       this.transitionProgress = 0;
@@ -4805,6 +4949,7 @@ export struct BrowserShell {
       }
     }, () => {
       this.rawDragX = exitOffset;
+      this.displayDragX = exitOffset;
       this.pageTranslateX = exitOffset;
       this.adjacentTranslateX = 0;
       this.transitionProgress = 1;
@@ -4822,6 +4967,11 @@ export struct BrowserShell {
       return;
     }
     this.rememberTabViewState();
+    const handoffFrame: image.PixelMap | undefined =
+      await this.captureHorizontalTabHandoffFrame(targetId);
+    if (!isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
+      return;
+    }
     try {
       await this.dispatcher.activateTab(targetId);
     } catch (_error) {
@@ -4850,7 +5000,9 @@ export struct BrowserShell {
     this.sceneActiveTab = this.tabStore.tabs.find(
       (tab: BrowserTabRecord) => tab.id === targetId
     );
+    this.publishHorizontalTabHandoffFrame(handoffFrame, targetId);
     this.rawDragX = 0;
+    this.displayDragX = 0;
     this.transitionProgress = 0;
     this.logAddressGestureState('rebase', true, false);
     this.restoreTabViewState(targetId);
@@ -5044,7 +5196,7 @@ export struct BrowserShell {
         tabs: this.sceneTabs,
         pendingTab: this.pendingTabForRender(),
         activeIndex: this.sceneActiveTabIndex(),
-        rawDragX: this.rawDragXForRender(),
+        displayDragX: this.displayDragXForRender(),
         viewportWidth: this.viewportWidth,
         interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
           this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
@@ -5131,6 +5283,11 @@ export struct BrowserShell {
             currentHost: this.hostControllers.get(this.sceneActiveTabId),
             previewHost: this.previewHost(),
             currentThumbnail: this.thumbnailFor(this.sceneActiveTabId),
+            handoffThumbnail: shouldShowHorizontalTabHandoff(
+              this.horizontalHandoffFrame !== undefined,
+              this.gestureActive || this.isDragging || this.gestureState !== TabGestureState.IDLE,
+              this.sceneActiveTabId === this.tabStore.activeTabId
+            ) ? this.horizontalHandoffFrame : undefined,
             previewThumbnail: this.previewThumbnail(),
             currentIsStartPage: this.sceneAddress() === 'about:blank' && this.errorState === undefined,
             preferCurrentThumbnail: this.addressHandoffActive && this.sceneAddress() === 'about:blank',
@@ -5180,7 +5337,17 @@ export struct BrowserShell {
             .layoutWeight(1)
             .width('100%')
             .height('100%')
-            .zIndex(this.overviewClosing ? 20 : 0)
+            // Keep the live page visually in front during the morph, but do
+            // not let its full-window wrapper intercept taps intended for a
+            // tab card underneath it.
+            .hitTestBehavior(
+              shouldDisableTabOverviewLivePageHitTesting(this.overviewProgress)
+                ? HitTestMode.None
+                : HitTestMode.Default
+            )
+            .zIndex(tabOverviewLivePageZIndex(
+              this.overviewClosing || this.overviewAnimationClosing
+            ))
 
         if (this.shouldRenderBottomBrowserBar()) {
           // One fixed floating TabBar. It is a sibling of the full-window
@@ -5202,7 +5369,7 @@ export struct BrowserShell {
               addressDraft: this.draftForSceneTab(),
               tabCount: this.tabStore.tabs.length,
               isPrivate: this.sceneTabForRender()?.isPrivate ?? false,
-              rawDragX: this.rawDragXForRender(),
+              displayDragX: this.displayDragXForRender(),
               viewportWidth: this.viewportWidth,
               interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
                 this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
@@ -5298,7 +5465,11 @@ export struct BrowserShell {
             // fully transparent and below the viewport there; disable the
             // parent hit target while the overview owns the interaction.
             .hitTestBehavior(
-              this.overviewProgress > 0 || this.overviewClosing || this.overviewAnimationClosing
+              shouldDisableBottomChromeHitTesting(
+                this.overviewProgress,
+                this.gestureActive && !this.addressGestureFinished,
+                this.overviewClosing || this.overviewAnimationClosing
+              )
                 ? HitTestMode.None
                 : HitTestMode.Default
             )
@@ -5346,6 +5517,7 @@ export struct BrowserShell {
             // BrowserTransitionScene. Do not add a second mount transition to
             // the card grid or it will drift away from the live page.
             .transition(TransitionEffect.IDENTITY)
+            .zIndex(tabOverviewGridZIndex())
         }
 
         // The address capsule remains one mounted node while it leaves the

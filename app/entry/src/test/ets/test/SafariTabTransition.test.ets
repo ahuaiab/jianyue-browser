@@ -17,7 +17,9 @@ import {
   shouldRenderAddressItem,
   shouldAnimateAddressItemExit,
   shouldCaptureStartPageThumbnailNow,
+  shouldShowHorizontalTabHandoff,
   shouldRenderStableTabPreview,
+  shouldPreferHorizontalPreviewThumbnail,
   tabSceneKeys,
   tabTransitionSceneVisualState
 } from '../../../main/ets/browser/model/SafariTabTransition';
@@ -38,6 +40,14 @@ export default function safariTabTransitionTest() {
       expect(frame.targetAddressX).assertEqual(253.5);
       expect(frame.targetIndex).assertEqual(2);
       expect(frame.previewKind).assertEqual(TabPreviewKind.EXISTING_TAB);
+    });
+
+    it('keeps the first tab fixed during a resisted right pull', 0, () => {
+      const frame = safariTransitionFrame(80, 400, 338, 0, 3);
+      expect(frame.currentPageX).assertEqual(0);
+      expect(frame.targetPageX).assertEqual(0);
+      expect(frame.previewKind).assertEqual(TabPreviewKind.NONE);
+      expect(frame.currentAddressX > 0).assertTrue();
     });
 
     it('keeps both native page layers moving until the transition settles', 0, () => {
@@ -82,11 +92,24 @@ export default function safariTabTransitionTest() {
       expect(shouldRenderStableTabPreview(false, true)).assertTrue();
     });
 
+    it('uses a cached preview frame while the target ArkWeb surface settles', 0, () => {
+      expect(shouldPreferHorizontalPreviewThumbnail(true, true)).assertTrue();
+      expect(shouldPreferHorizontalPreviewThumbnail(true, false)).assertFalse();
+      expect(shouldPreferHorizontalPreviewThumbnail(false, true)).assertFalse();
+    });
+
     it('rebases a committed target without changing its visible position', 0, () => {
       const before = sceneOffsetForIndex(2, 1, 400, -400);
       const after = sceneOffsetForIndex(2, 2, 400, 0);
       expect(before).assertEqual(0);
       expect(after).assertEqual(0);
+    });
+
+    it('shows the horizontal handoff frame only after the target is rebased', 0, () => {
+      expect(shouldShowHorizontalTabHandoff(false, false, true)).assertFalse();
+      expect(shouldShowHorizontalTabHandoff(true, true, true)).assertFalse();
+      expect(shouldShowHorizontalTabHandoff(true, false, false)).assertFalse();
+      expect(shouldShowHorizontalTabHandoff(true, false, true)).assertTrue();
     });
 
     it('uses a pending slot after the final tab', 0, () => {

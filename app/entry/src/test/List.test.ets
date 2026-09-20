@@ -20,6 +20,7 @@ import browserDownloadLifecycleTest from './ets/test/BrowserDownloadLifecycle.te
 import downloadProgressUiTest from './ets/test/DownloadProgressUi.test';
 import downloadManagerUiTest from './ets/test/DownloadManagerUi.test';
 import defaultBrowserApiTest from './ets/test/DefaultBrowserApi.test';
+import tabGestureMotionTest from './ets/test/TabGestureMotion.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -44,4 +45,5 @@ export default function testsuite() {
   downloadProgressUiTest();
   downloadManagerUiTest();
   defaultBrowserApiTest();
+  tabGestureMotionTest();
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  shouldDisableBottomChromeHitTesting,
+  shouldDisableTabOverviewLivePageHitTesting,
   shouldMountAddressTransitionLayer,
   shouldMountBottomBrowserBar,
   ADDRESS_SEARCH_BAR_STYLE,
@@ -14,11 +16,20 @@ import {
   tabOverviewChromeFrame,
   TabOverviewChromeFrame,
   tabOverviewGridOpacityAtProgress,
+  tabOverviewGridOpacityForTransition,
   tabOverviewActiveCardScrollOffset,
   tabOverviewGridMaxScrollOffset,
+  tabOverviewGridZIndex,
   tabOverviewLiveCaptionOpacity,
+  tabOverviewLivePageContentHeight,
+  tabOverviewLocalPageClipFrame,
+  tabOverviewLivePageContentTop,
+  tabOverviewLivePageZIndex,
+  tabOverviewTransitionViewportClipsOverflow,
+  tabOverviewThumbnailTopOffset,
   TAB_OVERVIEW_LAYOUT,
   TabOverviewPageFrame,
+  TabOverviewLocalPageClipFrame,
   tabOverviewPageFrame,
   tabOverviewSpringEasing,
   tabOverviewSpringVelocity
@@ -100,11 +111,69 @@ export default function tabOverviewTransitionTest() {
       expect(afterGridScroll.captionLocalTop).assertEqual(atGridOrigin.captionLocalTop);
     });
 
-    it('keeps the card grid hidden until the hero reaches handoff', 0, () => {
-      expect(tabOverviewGridOpacityAtProgress(0.5, true)).assertEqual(0);
-      expect(tabOverviewGridOpacityAtProgress(0.92, true)).assertEqual(0);
-      expect(tabOverviewGridOpacityAtProgress(0.96, true).toFixed(6)).assertEqual('0.500000');
+    it('shows the card grid from the first visible shrink frame', 0, () => {
+      expect(tabOverviewGridOpacityAtProgress(0, true) > 0).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.01, true) >
+        tabOverviewGridOpacityAtProgress(0, true)).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.25, true) >
+        tabOverviewGridOpacityAtProgress(0.01, true)).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.5, true) > 0).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.5, true) < 1).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.92, true) > 0).assertTrue();
+      expect(tabOverviewGridOpacityAtProgress(0.96, true) > 0).assertTrue();
       expect(tabOverviewGridOpacityAtProgress(1, true)).assertEqual(1);
+    });
+
+    it('removes the overview grid before reverse expansion reaches the full page', 0, () => {
+      expect(tabOverviewGridOpacityForTransition(1, true, true)).assertEqual(0);
+      expect(tabOverviewGridOpacityForTransition(0.5, true, true)).assertEqual(0);
+      expect(tabOverviewGridOpacityForTransition(0.35, true, true)).assertEqual(0);
+      expect(tabOverviewGridOpacityForTransition(0, true, true)).assertEqual(0);
+      expect(tabOverviewGridOpacityForTransition(-0.1, true, true)).assertEqual(0);
+      expect(tabOverviewGridOpacityForTransition(0, true, false) > 0).assertTrue();
+    });
+
+    it('keeps the background crop stable while the live page crosses the top inset', 0, () => {
+      const identity: TabOverviewPageFrame = tabOverviewPageFrame(0, 400, 800, 0, 137);
+      const nearIdentity: TabOverviewPageFrame = tabOverviewPageFrame(0.001, 400, 800, 0, 137);
+      const handoffMiddle: TabOverviewPageFrame = tabOverviewPageFrame(0.04, 400, 800, 0, 137);
+      const handoffEnd: TabOverviewPageFrame = tabOverviewPageFrame(0.08, 400, 800, 0, 137);
+      const middle: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 137);
+      expect(tabOverviewLivePageContentTop(identity, 137)).assertEqual(137);
+      // The safe-area handoff must not jump to zero on the first transformed
+      // frame; the same track is used while reversing the overview.
+      const nearIdentityTop: number = tabOverviewLivePageContentTop(nearIdentity, 137);
+      const handoffMiddleTop: number = tabOverviewLivePageContentTop(handoffMiddle, 137);
+      expect(nearIdentityTop > 136).assertTrue();
+      expect(nearIdentityTop < 137).assertTrue();
+      expect(handoffMiddleTop < nearIdentityTop).assertTrue();
+      expect(handoffMiddleTop > 0).assertTrue();
+      expect(tabOverviewLivePageContentTop(handoffEnd, 137)).assertEqual(0);
+      expect(tabOverviewLivePageContentTop(middle, 137)).assertEqual(0);
+      expect(tabOverviewLivePageContentTop(tabOverviewPageFrame(1, 400, 800, 0, 137), 137))
+        .assertEqual(0);
+      expect(tabOverviewLivePageContentHeight(identity, 800, 137)).assertEqual(663);
+      expect(tabOverviewLivePageContentHeight(middle, 800, 137)).assertEqual(663);
+    });
+
+    it('clips transformed page pixels to the transition viewport', 0, () => {
+      expect(tabOverviewTransitionViewportClipsOverflow()).assertTrue();
+    });
+
+    it('derives a local rounded clip window for transformed page pixels', 0, () => {
+      const page: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 0, 0);
+      const clip: TabOverviewLocalPageClipFrame = tabOverviewLocalPageClipFrame(page, 400, 800);
+      expect(clip.left.toFixed(6)).assertEqual('0.000000');
+      expect(clip.top.toFixed(6)).assertEqual('0.000000');
+      expect(clip.width.toFixed(6)).assertEqual('400.000000');
+      expect(clip.height.toFixed(6)).assertEqual('543.820225');
+      expect(clip.cornerRadius.toFixed(6)).assertEqual('35.955056');
+    });
+
+    it('keeps every static tab thumbnail flush with the card top', 0, () => {
+      expect(tabOverviewThumbnailTopOffset(137, 400)).assertEqual(0);
+      expect(tabOverviewThumbnailTopOffset(48, 720)).assertEqual(0);
+      expect(tabOverviewThumbnailTopOffset(0, 400)).assertEqual(0);
     });
 
     it('reveals the live page label before it shrinks into the card', 0, () => {
@@ -165,7 +234,7 @@ export default function tabOverviewTransitionTest() {
         .assertEqual(frame.addressVisualHeight.toFixed(6));
     });
 
-    it('starts toolbar rebound only after the address leaves the bottom chrome', 0, () => {
+    it('starts the monotonic toolbar exit only after the address leaves the bottom chrome', 0, () => {
       const before: TabOverviewPageFrame = tabOverviewPageFrame(0.18, 400, 800, 0, 0);
       const after: TabOverviewPageFrame = tabOverviewPageFrame(0.3, 400, 800, 0, 0);
       const beforeChrome: TabOverviewChromeFrame = tabOverviewChromeFrame(
@@ -213,12 +282,13 @@ export default function tabOverviewTransitionTest() {
       expect(shouldMountAddressTransitionLayer(true)).assertFalse();
     });
 
-    it('keeps the returning bottom chrome above the live page', 0, () => {
-      expect(tabOverviewBottomChromeZIndex(false)).assertEqual(10);
-      expect(tabOverviewBottomChromeZIndex(true) > 20).assertTrue();
+    it('keeps the bottom chrome above the live page in both directions', 0, () => {
+      expect(tabOverviewBottomChromeZIndex(false) > tabOverviewLivePageZIndex(false)).assertTrue();
+      expect(tabOverviewBottomChromeZIndex(true) > tabOverviewLivePageZIndex(true)).assertTrue();
     });
 
-    it('keeps the address capsule above the returning bottom chrome', 0, () => {
+    it('keeps the address capsule above the bottom chrome in both directions', 0, () => {
+      expect(tabOverviewAddressLayerZIndex() > tabOverviewBottomChromeZIndex(false)).assertTrue();
       expect(tabOverviewAddressLayerZIndex() > tabOverviewBottomChromeZIndex(true)).assertTrue();
     });
 
@@ -267,16 +337,16 @@ export default function tabOverviewTransitionTest() {
       expect(lateChrome.addressOpacity).assertEqual(0);
     });
 
-    it('gives the chrome a visible jelly response on entry', 0, () => {
+    it('keeps the chrome on one track without decorative rebound on entry', 0, () => {
       const page: TabOverviewPageFrame = tabOverviewPageFrame(0.33, 400, 800, 0, 0);
       const frame: TabOverviewChromeFrame = tabOverviewChromeFrame(
         0.33, false, 400, 800, 104, page
       );
-      expect(frame.addressJellyScaleX > 1).assertTrue();
-      expect(frame.addressJellyScaleY < 1).assertTrue();
-      expect(frame.addressJellyTranslateY < 0).assertTrue();
-      expect(frame.toolbarScaleX > 1).assertTrue();
-      expect(frame.toolbarScaleY > 1).assertTrue();
+      expect(frame.addressJellyScaleX).assertEqual(1);
+      expect(frame.addressJellyScaleY).assertEqual(1);
+      expect(frame.addressJellyTranslateY).assertEqual(0);
+      expect(frame.toolbarScaleX).assertEqual(1);
+      expect(frame.toolbarScaleY).assertEqual(1);
     });
 
     it('keeps the address track fixed during an upward overview drag', 0, () => {
@@ -300,19 +370,22 @@ export default function tabOverviewTransitionTest() {
       expect(frame.toolbarTranslateY).assertEqual(0);
     });
 
-    it('adds a bounded jelly response while the address capsule merges back', 0, () => {
+    it('keeps the chrome on one track while the address capsule merges back', 0, () => {
       const page: TabOverviewPageFrame = tabOverviewPageFrame(0.09, 400, 800, 0, 0);
       const jellyFrame: TabOverviewChromeFrame = tabOverviewChromeFrame(
         0.09, true, 400, 800, 104, page
       );
-      expect(jellyFrame.addressJellyScaleX > 1).assertTrue();
-      expect(jellyFrame.addressJellyScaleY < 1).assertTrue();
+      expect(jellyFrame.addressJellyScaleX).assertEqual(1);
+      expect(jellyFrame.addressJellyScaleY).assertEqual(1);
+      expect(jellyFrame.addressJellyTranslateY).assertEqual(0);
       const toolbarPage: TabOverviewPageFrame = tabOverviewPageFrame(0.3, 400, 800, 0, 0);
       const toolbarFrame: TabOverviewChromeFrame = tabOverviewChromeFrame(
         0.3, true, 400, 800, 104, toolbarPage
       );
       expect(toolbarFrame.toolbarOpacity > 0).assertTrue();
       expect(toolbarFrame.toolbarOpacity < 1).assertTrue();
+      expect(toolbarFrame.toolbarScaleX).assertEqual(1);
+      expect(toolbarFrame.toolbarScaleY).assertEqual(1);
     });
 
     it('keeps the live label attached to the shrinking page bottom', 0, () => {
@@ -347,13 +420,32 @@ export default function tabOverviewTransitionTest() {
     it('keeps exactly one blue border owner through the overview handoff', 0, () => {
       expect(tabOverviewBorderOwner(0, false)).assertEqual('none');
       expect(tabOverviewBorderOwner(0.97, false)).assertEqual('live-page');
-      // The grid is already visible in the final handoff segment. Its fixed
-      // card bounds must own the ring before the live clip reaches 1.0, or the
-      // live frame remains taller than the card for a visible final frame.
-      expect(tabOverviewBorderOwner(0.98, false)).assertEqual('card');
-      expect(tabOverviewBorderOwner(1, false)).assertEqual('card');
+      // The live page is the foreground layer throughout the overview. Its
+      // outline must remain the visible ring after the page reaches the card
+      // slot; the card shell sits underneath it and cannot own that pixel.
+      expect(tabOverviewBorderOwner(0.98, false)).assertEqual('live-page');
+      expect(tabOverviewBorderOwner(1, false)).assertEqual('live-page');
       expect(tabOverviewBorderOwner(1, true)).assertEqual('live-page');
       expect(tabOverviewBorderOwner(0.4, true)).assertEqual('live-page');
+    });
+
+    it('keeps the current page above overview cards throughout the morph', 0, () => {
+      expect(tabOverviewLivePageZIndex(false) > tabOverviewGridZIndex()).assertTrue();
+      expect(tabOverviewLivePageZIndex(true) > tabOverviewGridZIndex()).assertTrue();
+    });
+
+    it('removes live page hit testing while the overview is visible', 0, () => {
+      expect(shouldDisableTabOverviewLivePageHitTesting(0)).assertFalse();
+      expect(shouldDisableTabOverviewLivePageHitTesting(-0.1)).assertFalse();
+      expect(shouldDisableTabOverviewLivePageHitTesting(0.01)).assertTrue();
+      expect(shouldDisableTabOverviewLivePageHitTesting(1)).assertTrue();
+    });
+
+    it('keeps the bottom chrome gesture alive until the overview drag ends', 0, () => {
+      expect(shouldDisableBottomChromeHitTesting(0.2, true, false)).assertFalse();
+      expect(shouldDisableBottomChromeHitTesting(0.2, false, false)).assertTrue();
+      expect(shouldDisableBottomChromeHitTesting(0, true, false)).assertFalse();
+      expect(shouldDisableBottomChromeHitTesting(0.2, true, true)).assertTrue();
     });
 
     it('shrinks the live page monotonically toward the card slot', 0, () => {

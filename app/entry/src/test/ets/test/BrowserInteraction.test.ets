@@ -8,7 +8,9 @@ import {
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,
   isOverviewSettled,
-  overviewScaleAtProgress
+  overviewScaleAtProgress,
+  shouldDeferTabOverviewSnapshotRevision,
+  shouldUpdateTransitionSystemBar
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import {
   addressBarLabelFor,
@@ -28,6 +30,20 @@ export default function browserInteractionTest() {
       expect(overviewScaleAtProgress(0, 0.92)).assertEqual(0.92);
       expect(overviewScaleAtProgress(0.5, 0.92)).assertEqual(0.96);
       expect(overviewScaleAtProgress(1, 0.92)).assertEqual(1);
+    });
+
+    it('updates the transition system bar only when its requested state changes', 0, () => {
+      expect(shouldUpdateTransitionSystemBar(false, true)).assertTrue();
+      expect(shouldUpdateTransitionSystemBar(true, true)).assertFalse();
+      expect(shouldUpdateTransitionSystemBar(true, false)).assertTrue();
+      expect(shouldUpdateTransitionSystemBar(false, false)).assertFalse();
+    });
+
+    it('defers snapshot revisions while the overview transition is mounted', 0, () => {
+      expect(shouldDeferTabOverviewSnapshotRevision(0, false, false)).assertFalse();
+      expect(shouldDeferTabOverviewSnapshotRevision(0.01, false, false)).assertTrue();
+      expect(shouldDeferTabOverviewSnapshotRevision(0, true, false)).assertTrue();
+      expect(shouldDeferTabOverviewSnapshotRevision(0, false, true)).assertTrue();
     });
 
     it('restores the search query instead of exposing the search result URL', 0, () => {

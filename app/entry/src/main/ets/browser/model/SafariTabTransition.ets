@@ -1,5 +1,6 @@
 import {
-  newTabBackgroundProgressForPullProgress, TabPreviewKind
+  newTabBackgroundProgressForPullProgress, tabGestureMotion,
+  TabGestureMotionState, TabPreviewKind
 } from './TabGestureMotion';
 
 export interface SafariTransitionFrame {
@@ -84,6 +85,19 @@ export function shouldRenderStableTabPreview(
   hasPreviewThumbnail: boolean
 ): boolean {
   return hasPreviewHost || hasPreviewThumbnail;
+}
+
+/**
+ * A cached target frame is stable during a horizontal drag, while the native
+ * ArkWeb preview surface may still be waiting for its first compositor frame.
+ * Keep the native host mounted underneath but let the PixelMap own the visible
+ * preview pixels until the gesture settles.
+ */
+export function shouldPreferHorizontalPreviewThumbnail(
+  showPreview: boolean,
+  hasPreviewThumbnail: boolean
+): boolean {
+  return showPreview && hasPreviewThumbnail;
 }
 
 /**
@@ -229,21 +243,20 @@ export function safariTransitionFrame(dragX: number, pageWidth: number, addressS
   const count: number = Math.max(0, Math.trunc(tabCount));
   const index: number = Math.max(0, Math.trunc(activeIndex));
   const horizontal: number = finite(dragX);
-  const direction: number = horizontal < 0 ? 1 : -1;
-  const candidate: number = index + direction;
-  const isNewTab: boolean = horizontal < 0 && candidate >= count;
-  const hasExistingTarget: boolean = candidate >= 0 && candidate < count;
-  const targetIndex: number = isNewTab ? count : (hasExistingTarget ? candidate : index);
-  const previewKind: TabPreviewKind = isNewTab ? TabPreviewKind.NEW_TAB
-    : (hasExistingTarget ? TabPreviewKind.EXISTING_TAB : TabPreviewKind.NONE);
+  const motion: TabGestureMotionState = tabGestureMotion(horizontal, pageWidth, index, count);
+  const targetIndex: number = motion.previewKind === TabPreviewKind.EXISTING_TAB
+    ? motion.previewIndex
+    : (motion.previewKind === TabPreviewKind.NEW_TAB ? count : index);
   return {
     progress: clamp(horizontal / Math.max(1, finite(pageWidth))),
-    currentPageX: sceneOffsetForIndex(index, index, pageWidth, horizontal),
-    targetPageX: sceneOffsetForIndex(targetIndex, index, pageWidth, horizontal),
-    currentAddressX: addressOffsetForIndex(index, index, addressStride, horizontal, pageWidth),
-    targetAddressX: addressOffsetForIndex(targetIndex, index, addressStride, horizontal, pageWidth),
+    currentPageX: motion.pageTranslateX,
+    targetPageX: motion.adjacentTranslateX,
+    currentAddressX: addressOffsetForIndex(index, index, addressStride,
+      motion.displayDragX, pageWidth),
+    targetAddressX: addressOffsetForIndex(targetIndex, index, addressStride,
+      motion.displayDragX, pageWidth),
     targetIndex,
-    previewKind
+    previewKind: motion.previewKind
   };
 }
 
@@ -296,6 +309,20 @@ export function shouldRenderPendingTabPreview(
   newTabProgress: number
 ): boolean {
   return previewKind === TabPreviewKind.NEW_TAB && finite(newTabProgress) > 0;
+}
+
+/**
+ * ArkWeb may reattach its native surface when a settled horizontal target
+ * moves from the preview NodeContainer into the current NodeContainer. Keep
+ * a captured target frame above that one compositor handoff, but never cover
+ * an active gesture or an unrebased scene.
+ */
+export function shouldShowHorizontalTabHandoff(
+  hasFrame: boolean,
+  gestureActive: boolean,
+  sceneRebased: boolean
+): boolean {
+  return hasFrame && !gestureActive && sceneRebased;
 }
 
 export function tabSceneKeys(tabIds: string[], pendingId: string = ''): string[] {

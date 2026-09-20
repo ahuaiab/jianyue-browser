@@ -46,7 +46,7 @@ export struct AddressTabStrip {
   @Param tabs: BrowserTabRecord[] = [];
   @Param pendingTab: PendingTabDraft | undefined = undefined;
   @Param activeIndex: number = 0;
-  @Param rawDragX: number = 0;
+  @Param displayDragX: number = 0;
   @Param viewportWidth: number = 0;
   @Param interactionLocked: boolean = false;
   @Param address: string = '';
@@ -157,11 +157,11 @@ export struct AddressTabStrip {
 
   private itemOffset(index: number): number {
     return addressItemLeft(index, this.activeIndex, this.itemWidth(),
-      SAFARI_ADDRESS_ITEM_GAP_VP, this.rawDragX, this.layoutWidth());
+      SAFARI_ADDRESS_ITEM_GAP_VP, this.displayDragX, this.layoutWidth());
   }
 
   private itemOpacity(index: number): number {
-    return addressPreviewOpacity(index, this.activeIndex, this.rawDragX, this.viewportWidth);
+    return addressPreviewOpacity(index, this.activeIndex, this.displayDragX, this.viewportWidth);
   }
 
   private addressPlusOpacity(): number {
@@ -322,7 +322,7 @@ export struct AddressTabStrip {
         }
       } else {
         ForEach(this.tabs, (tab: BrowserTabRecord, index: number) => {
-          if (shouldRenderAddressItem(index, this.activeIndex, this.rawDragX,
+          if (shouldRenderAddressItem(index, this.activeIndex, this.displayDragX,
             this.tabs.length, this.previewKind, this.handoffOwnsAddressSlot())) {
             this.tabItem(tab, index);
           }

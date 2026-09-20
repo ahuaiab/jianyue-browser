@@ -30,7 +30,7 @@ export struct BottomBrowserBar {
   @Param tabCount: number = 1;
   @Param isPrivate: boolean = false;
   @Param currentIndex: number = 0;
-  @Param rawDragX: number = 0;
+  @Param displayDragX: number = 0;
   @Param viewportWidth: number = 0;
   @Param interactionLocked: boolean = false;
   @Param bottomInset: number = 0;
@@ -91,7 +91,7 @@ export struct BottomBrowserBar {
         if (this.renderAddress) {
           AddressTabStrip({
           tabs: this.tabs, pendingTab: this.pendingTab, activeIndex: this.currentIndex,
-          rawDragX: this.rawDragX, viewportWidth: this.viewportWidth,
+          displayDragX: this.displayDragX, viewportWidth: this.viewportWidth,
           interactionLocked: this.interactionLocked,
           address: this.address, searchQuery: this.searchQuery,
           addressDraft: this.addressDraft, isPrivate: this.isPrivate,

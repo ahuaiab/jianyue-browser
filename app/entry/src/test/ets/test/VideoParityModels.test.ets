@@ -1065,9 +1065,10 @@ export default function videoParityModelsTest() {
       expect(fallback.height).assertEqual(1440);
     });
 
-    it('keeps the thumbnail content inset aligned with the scaled live page', 0, () => {
+    it('keeps every thumbnail flush with the card top', 0, () => {
       expect(tabOverviewThumbnailTopOffset(0, 400)).assertEqual(0);
-      expect(tabOverviewThumbnailTopOffset(40, 400)).assertEqual(17.8);
+      expect(tabOverviewThumbnailTopOffset(40, 400)).assertEqual(0);
+      expect(tabOverviewThumbnailTopOffset(48, 720)).assertEqual(0);
     });
 
     it('keeps card long-press actions aligned with the video menu', 0, () => {

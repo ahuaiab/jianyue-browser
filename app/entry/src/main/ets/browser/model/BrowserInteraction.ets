@@ -132,6 +132,32 @@ export function shouldWaitForOverviewClose(
 }
 
 /**
+ * Window system-bar properties are global compositor state. Re-issuing the
+ * same request from every gesture frame can invalidate the safe-area surface
+ * while the overview is being revealed.
+ */
+export function shouldUpdateTransitionSystemBar(
+  currentOpaque: boolean,
+  requestedOpaque: boolean
+): boolean {
+  return currentOpaque !== requestedOpaque;
+}
+
+/**
+ * Snapshot pixels may arrive after the overview has mounted. Keep the
+ * thumbnail map private to the transition and publish one revision only after
+ * the native overview animator releases its frame transaction.
+ */
+export function shouldDeferTabOverviewSnapshotRevision(
+  overviewProgress: number,
+  overviewClosing: boolean,
+  overviewAnimationClosing: boolean
+): boolean {
+  return overviewClosing || overviewAnimationClosing ||
+    (Number.isFinite(overviewProgress) && overviewProgress > 0);
+}
+
+/**
  * A partially revealed overview is still an interactive transition.  It must
  * be allowed to settle to 1 after an upward swipe; treating any value above
  * zero as "already open" leaves the whole overview panel translucent.
