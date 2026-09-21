@@ -429,9 +429,14 @@ export default function tabOverviewTransitionTest() {
       expect(tabOverviewBorderOwner(0.4, true)).assertEqual('live-page');
     });
 
-    it('keeps the current page above overview cards throughout the morph', 0, () => {
-      expect(tabOverviewLivePageZIndex(false) > tabOverviewGridZIndex()).assertTrue();
-      expect(tabOverviewLivePageZIndex(true) > tabOverviewGridZIndex()).assertTrue();
+    it('hands settled card interaction above the live page without changing morph order', 0, () => {
+      // During the interactive morph the live page stays visually in front,
+      // but once overview settles the card grid must own the pointer stream.
+      // A native ArkWeb surface can otherwise consume the active card's tap
+      // and horizontal close gesture even when its ArkUI wrapper is None.
+      expect(tabOverviewLivePageZIndex(false) > tabOverviewGridZIndex(0.5, false)).assertTrue();
+      expect(tabOverviewGridZIndex(1, false) > tabOverviewLivePageZIndex(false)).assertTrue();
+      expect(tabOverviewLivePageZIndex(true) > tabOverviewGridZIndex(1, true)).assertTrue();
     });
 
     it('removes live page hit testing while the overview is visible', 0, () => {

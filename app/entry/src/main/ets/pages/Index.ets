@@ -30,6 +30,12 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    // Paint the browser scene edge-to-edge in either orientation. BrowserShell
+    // applies the live four-edge avoid areas only to interactive content and
+    // fixed chrome, so landscape cutouts do not shrink the page background.
+    .expandSafeArea(
+      [SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
+      [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM, SafeAreaEdge.START, SafeAreaEdge.END]
+    )
   }
 }

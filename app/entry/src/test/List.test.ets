@@ -21,6 +21,7 @@ import downloadProgressUiTest from './ets/test/DownloadProgressUi.test';
 import downloadManagerUiTest from './ets/test/DownloadManagerUi.test';
 import defaultBrowserApiTest from './ets/test/DefaultBrowserApi.test';
 import tabGestureMotionTest from './ets/test/TabGestureMotion.test';
+import adaptiveBrowserLayoutTest from './ets/test/AdaptiveBrowserLayout.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -46,4 +47,5 @@ export default function testsuite() {
   downloadManagerUiTest();
   defaultBrowserApiTest();
   tabGestureMotionTest();
+  adaptiveBrowserLayoutTest();
 }

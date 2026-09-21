@@ -112,11 +112,12 @@ export struct TabOverview {
     this.scheduleActiveCardScroll(this.gridScrollOffset);
   }
 
-  @Monitor('viewportHeight')
+  @Monitor('viewportWidth', 'viewportHeight')
   private onOverviewViewportChanged(): void {
     // The IME and avoid-area changes can resize the Grid without producing a
-    // scroll callback. Re-read the Scroller after layout so the live page
-    // follows the same effective offset as the cards.
+    // scroll callback. Rotation also changes the two-column card width, so
+    // keep the active row anchored before publishing the post-layout offset.
+    this.scheduleActiveCardScroll(this.gridScrollOffset);
     setTimeout(() => this.publishGridScrollOffset(), 0);
   }
 

@@ -10,6 +10,8 @@ import { BrowserActionToolbar } from './BrowserActionToolbar';
 import {
   SAFARI_ADDRESS_ROW_HEIGHT_VP,
   SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
+  SAFARI_BOTTOM_CHROME_FALLBACK_COLOR,
+  SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
   SAFARI_BOTTOM_CHROME_RADIUS_VP
 } from '../model/BrowserVisualMetrics';
 
@@ -85,6 +87,8 @@ export struct BottomBrowserBar {
   @Param onBack: () => void = () => undefined;
   @Param onForward: () => void = () => undefined;
 
+  private immersiveMaterialSupported: boolean = uiMaterial.isImmersiveMaterialSupported();
+
   build() {
     Column() {
       Column() {
@@ -145,15 +149,21 @@ export struct BottomBrowserBar {
       .id('safari-bottom-chrome')
       .width('100%')
       .height(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + Math.max(0, this.bottomInset))
-      .backgroundColor('#F2F2F7')
+      .backgroundColor(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR)
       .borderRadius({ topLeft: SAFARI_BOTTOM_CHROME_RADIUS_VP,
-        topRight: SAFARI_BOTTOM_CHROME_RADIUS_VP, bottomLeft: 0, bottomRight: 0 })
+        topRight: SAFARI_BOTTOM_CHROME_RADIUS_VP,
+        bottomLeft: SAFARI_BOTTOM_CHROME_RADIUS_VP,
+        bottomRight: SAFARI_BOTTOM_CHROME_RADIUS_VP })
       .clip(true)
-      .shadow({ radius: 16, color: '#28000000', offsetX: 0, offsetY: 4 })
-      .systemMaterial(new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-        interactive: true
-      }))
-      .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY);
+      .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
+      .systemMaterial(this.immersiveMaterialSupported
+        ? new uiMaterial.ImmersiveMaterial({
+          style: uiMaterial.ImmersiveStyle.THICK,
+          materialColor: SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
+          applyShadow: true,
+          interactive: true,
+          lightEffect: { color: undefined }
+        })
+        : undefined);
   }
 }

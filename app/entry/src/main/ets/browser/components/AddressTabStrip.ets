@@ -1,3 +1,4 @@
+import { RectShape } from '@kit.ArkUI';
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
 import { BrowserTabRecord, lastValidUrlForTab, PendingTabDraft, searchQueryForUrl } from '../model/BrowserTypes';
@@ -5,6 +6,8 @@ import {
   SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
   SAFARI_ADDRESS_ROW_HEIGHT_VP,
+  SafariAddressTrackClipFrame,
+  safariAddressTrackClipFrame,
   safariAddressItemWidth
 } from '../model/BrowserVisualMetrics';
 import {
@@ -149,6 +152,18 @@ export struct AddressTabStrip {
 
   private frameTranslateY(): number {
     return this.overviewChromeFrame?.addressJellyTranslateY ?? 0;
+  }
+
+  private addressTrackClipShape(): RectShape {
+    const frame: SafariAddressTrackClipFrame = safariAddressTrackClipFrame(
+      this.layoutWidth(),
+      this.overviewTransitionActive
+    );
+    return new RectShape({
+      width: frame.width,
+      height: this.frameHeight(),
+      radius: [frame.topRadius, frame.topRadius, 0, 0]
+    }).position({ x: frame.left, y: 0 });
   }
 
   private itemWidth(): number {
@@ -335,7 +350,7 @@ export struct AddressTabStrip {
           }
             .width('100%')
             .height('100%')
-            .backgroundColor(Color.White)
+            .backgroundColor('#BFFFFFFF')
             .borderRadius(ADDRESS_PREVIEW_SURFACE.cornerRadius)
             .opacity(this.addressBackgroundOpacity());
           SymbolGlyph($r('sys.symbol.plus'))
@@ -379,13 +394,10 @@ export struct AddressTabStrip {
           .height(ADDRESS_SEARCH_BAR_STYLE.height)
           .clip(true)
           .position({ x: this.itemOffset(this.handoffIndex()), y: ADDRESS_SEARCH_BAR_TOP_PADDING })
-          .backgroundColor(this.handoffUsesPendingSlot() ? Color.Transparent : Color.White)
+          .backgroundColor(this.handoffUsesPendingSlot() ? Color.Transparent : '#BFFFFFFF')
           .borderRadius(ADDRESS_SEARCH_BAR_STYLE.cornerRadius)
           .border({ width: this.handoffUsesPendingSlot() ? 0 : 1,
             color: this.handoffUsesPendingSlot() ? '#00000000' : '#55FFFFFF' })
-          .shadow(this.handoffUsesPendingSlot()
-            ? { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 }
-            : { radius: 12, color: '#24000000', offsetX: 0, offsetY: 2 })
           .hitTestBehavior(HitTestMode.None);
       }
     }
@@ -396,7 +408,7 @@ export struct AddressTabStrip {
       .scale({ x: this.frameScaleX(), y: this.frameScaleY(), z: 1 })
       .translate({ x: 0, y: this.frameTranslateY(), z: 0 })
       .opacity(this.overviewChromeFrame?.addressOpacity ?? 1)
-      .clip(true)
+      .clipShape(this.addressTrackClipShape())
       // The transition layer is mounted above the bottom chrome so the
       // address capsule can morph independently. In its normal position,
       // transparent hit testing keeps the capsule interactive without
@@ -423,7 +435,6 @@ export struct AddressTabStrip {
         );
       })
       .onTouch((event?: TouchEvent) => this.handleTouch(event))
-      .hitTestBehavior(this.overviewTransitionActive ? HitTestMode.None : HitTestMode.Default)
       .gesture(
         PanGesture(new PanGestureOptions({ direction: PanDirection.All, fingers: 1, distance: 8 }))
           .onActionStart((_event: GestureEvent) =>

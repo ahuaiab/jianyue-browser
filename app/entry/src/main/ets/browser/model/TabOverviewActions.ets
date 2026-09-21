@@ -739,12 +739,22 @@ export function shouldDisableBottomChromeHitTesting(
 }
 
 /**
- * Keep the selected live page above the overview grid in both directions.
- * Relying on declaration order is not enough when the native NodeContainer
- * participates in compositing; the current page must own the foreground
- * pixels while the rear cards remain visible around it.
+ * Keep the selected live page above the overview grid while either direction
+ * is moving. At the settled endpoint the grid becomes the foreground hit
+ * owner so the native NodeContainer cannot steal card interactions.
  */
-export function tabOverviewGridZIndex(): number {
+export function tabOverviewGridZIndex(
+  overviewProgress: number = 0,
+  overviewClosing: boolean = false
+): number {
+  // The transformed live page must lead while it is moving, otherwise rear
+  // cards can paint over the current card during the morph. At the settled
+  // endpoint, however, the Grid must become the top ArkUI hit owner: native
+  // ArkWeb content can keep consuming pointer streams even after an ancestor
+  // is switched to HitTestMode.None.
+  if (!overviewClosing && clampOverviewProgress(overviewProgress) >= 1) {
+    return 25;
+  }
   return 15;
 }
 
@@ -841,7 +851,9 @@ export function tabOverviewChromeFrame(
   viewportWidth: number,
   viewportHeight: number,
   chromeHeight: number,
-  pageFrame: TabOverviewPageFrame
+  pageFrame: TabOverviewPageFrame,
+  restingChromeLeft: number = 0,
+  restingChromeWidth: number = viewportWidth
 ): TabOverviewChromeFrame {
   const clampedProgress: number = clampOverviewProgress(progress);
   const width: number = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : 1;
@@ -853,9 +865,15 @@ export function tabOverviewChromeFrame(
     Number.isFinite(pageFrame.scaleX) ? pageFrame.scaleX : 1));
   const pageScaleY: number = Math.max(0.01, Math.min(1,
     Number.isFinite(pageFrame.scaleY) ? pageFrame.scaleY : pageScale));
-  const fullLeft: number = 8;
+  const safeRestingLeft: number = Number.isFinite(restingChromeLeft)
+    ? restingChromeLeft
+    : 0;
+  const safeRestingWidth: number = Number.isFinite(restingChromeWidth) && restingChromeWidth > 0
+    ? restingChromeWidth
+    : width;
+  const fullLeft: number = safeRestingLeft + 8;
   const fullTop: number = height - safeChromeHeight + ADDRESS_SEARCH_BAR_TOP_PADDING;
-  const fullWidth: number = Math.max(1, width - 16);
+  const fullWidth: number = Math.max(1, safeRestingWidth - 16);
   const fullHeight: number = ADDRESS_SEARCH_BAR_STYLE.height;
 
   // `pageFrame` is already evaluated at `clampedProgress`. Do not interpolate

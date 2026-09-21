@@ -103,19 +103,27 @@ import {
 } from '../model/TabOverviewActions';
 import {
   availableContentHeight,
-  topContentInsetFromAvoidRects,
+  safeAreaInsetsFromAvoidAreas,
+  WindowAvoidAreaRects,
+  WindowAvoidInsets,
+  WindowAvoidRect,
   visibleContentHeight
 } from '../model/WindowAvoidance';
 import {
   BROWSER_MODAL_Z_INDEX,
   BROWSER_OVERVIEW_ANIMATION_DURATION_MS,
   BROWSER_OVERVIEW_TRANSITION_DURATION_MS,
+  BrowserChromeAnchor,
+  BrowserChromeLayoutFrame,
+  browserChromeLayoutFrame,
   HARMONY_RADIUS_CARD,
   SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS,
   SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS,
   SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
   SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
+  SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP,
+  SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
   safariAddressItemWidth,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP,
@@ -783,14 +791,18 @@ export struct BrowserShell {
   @Local canNavigateForward: boolean = false;
   @Local navigationStateRevision: number = 0;
   // The window is laid out edge-to-edge. Keep the immersive background, but
-  // expose one unified top avoid inset for web content and top overlays. The
-  // value includes the larger of TYPE_SYSTEM and TYPE_CUTOUT and is applied
-  // once by BrowserTransitionScene.
+  // expose live four-edge avoid insets for content and fixed controls. Top is
+  // applied once by BrowserTransitionScene; horizontal insets constrain only
+  // the floating chrome while the scene background stays edge-to-edge.
   @Local topAvoidInset: number = 0;
   // Bottom gesture-navigation indicator height used by bottom sheets and
   // footer controls. The background can extend into this area; actions may
   // not be placed beneath it.
   @Local bottomAvoidInset: number = 0;
+  // Horizontal avoid areas become relevant after rotation. They constrain
+  // only fixed browser chrome; the page background remains edge-to-edge.
+  @Local leftAvoidInset: number = 0;
+  @Local rightAvoidInset: number = 0;
 
   private readonly tabStore: TabStore = new TabStore();
   // The fixed TabBar owns the only app-level horizontal gesture stream and
@@ -902,7 +914,7 @@ export struct BrowserShell {
     this.addressInputMounted = true;
     this.addressInputFocusEnabled = true;
     const uiContext: UIContext = this.getUIContext();
-    this.observeTopAvoidArea(uiContext);
+    this.observeWindowAvoidArea(uiContext);
     const hostContext = uiContext.getHostContext();
     const permissionHandler = hostContext === undefined
       ? undefined
@@ -1206,7 +1218,33 @@ export struct BrowserShell {
    * all three areas on every event avoids stale TYPE_CUTOUT data during
    * rotation or a full-screen/window-size transition.
    */
-  private observeTopAvoidArea(uiContext: UIContext): void {
+  private windowAvoidRect(rect: window.Rect): WindowAvoidRect {
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+  }
+
+  private windowAvoidAreaRects(area: window.AvoidArea): WindowAvoidAreaRects {
+    return {
+      topRect: this.windowAvoidRect(area.topRect),
+      bottomRect: this.windowAvoidRect(area.bottomRect),
+      leftRect: this.windowAvoidRect(area.leftRect),
+      rightRect: this.windowAvoidRect(area.rightRect)
+    };
+  }
+
+  private avoidInsetPxToVp(uiContext: UIContext, insetPx: number): number {
+    try {
+      return Math.max(0, uiContext.px2vp(insetPx));
+    } catch (_error) {
+      return 0;
+    }
+  }
+
+  private observeWindowAvoidArea(uiContext: UIContext): void {
     const hostContext = uiContext.getHostContext();
     if (hostContext === undefined) {
       return;
@@ -1217,61 +1255,61 @@ export struct BrowserShell {
       }
       this.mainWindow = mainWindow;
       const updateAvoidInsets = (reason: string): void => {
-        let systemTopPx: number = 0;
-        let systemHeightPx: number = 0;
-        let cutoutTopPx: number = 0;
-        let cutoutHeightPx: number = 0;
+        const areas: WindowAvoidAreaRects[] = [];
+        let windowWidthPx: number = 0;
+        let windowHeightPx: number = 0;
         try {
-          const systemArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-          systemTopPx = systemArea.topRect.top;
-          systemHeightPx = systemArea.topRect.height;
+          const windowRect: window.Rect = mainWindow.getWindowProperties().windowRect;
+          windowWidthPx = windowRect.width;
+          windowHeightPx = windowRect.height;
         } catch (_error) {
-          systemTopPx = 0;
-          systemHeightPx = 0;
+          windowWidthPx = 0;
+          windowHeightPx = 0;
         }
         try {
-          const cutoutArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_CUTOUT);
-          cutoutTopPx = cutoutArea.topRect.top;
-          cutoutHeightPx = cutoutArea.topRect.height;
+          areas.push(this.windowAvoidAreaRects(
+            mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM)));
         } catch (_error) {
-          cutoutTopPx = 0;
-          cutoutHeightPx = 0;
-        }
-        const topInsetPx: number = topContentInsetFromAvoidRects(
-          systemTopPx,
-          systemHeightPx,
-          cutoutTopPx,
-          cutoutHeightPx
-        );
-        try {
-          this.topAvoidInset = Math.max(0, uiContext.px2vp(topInsetPx));
-        } catch (_error) {
-          this.topAvoidInset = 0;
-        }
-        let navigationHeightPx: number = 0;
-        try {
-          const navigationArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-          navigationHeightPx = navigationArea.bottomRect.height;
-        } catch (_error) {
-          navigationHeightPx = 0;
         }
         try {
-          this.bottomAvoidInset = Math.max(0, uiContext.px2vp(navigationHeightPx));
+          areas.push(this.windowAvoidAreaRects(
+            mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_CUTOUT)));
         } catch (_error) {
-          this.bottomAvoidInset = 0;
         }
+        try {
+          areas.push(this.windowAvoidAreaRects(
+            mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR)));
+        } catch (_error) {
+        }
+        const insetsPx: WindowAvoidInsets = safeAreaInsetsFromAvoidAreas(
+          windowWidthPx, windowHeightPx, areas);
+        const windowWidthVp: number = this.avoidInsetPxToVp(uiContext, windowWidthPx);
+        const windowHeightVp: number = this.avoidInsetPxToVp(uiContext, windowHeightPx);
+        // Prime the first frame from the native window. BrowserTransitionScene
+        // will publish its measured size again after layout; doing this here
+        // prevents a cold landscape launch from briefly using the 400x800
+        // fallback at the left edge of the real window.
+        if (windowWidthVp > 0) {
+          this.viewportWidth = windowWidthVp;
+        }
+        if (windowHeightVp > 0) {
+          this.viewportHeight = windowHeightVp;
+        }
+        this.topAvoidInset = this.avoidInsetPxToVp(uiContext, insetsPx.top);
+        this.bottomAvoidInset = this.avoidInsetPxToVp(uiContext, insetsPx.bottom);
+        this.leftAvoidInset = this.avoidInsetPxToVp(uiContext, insetsPx.left);
+        this.rightAvoidInset = this.avoidInsetPxToVp(uiContext, insetsPx.right);
         hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
-          'windowAvoidance reason=%{public}s systemTopPx=%{public}d systemHeightPx=%{public}d ' +
-          'cutoutTopPx=%{public}d cutoutHeightPx=%{public}d topInsetPx=%{public}d ' +
-          'topInsetVp=%{public}s navigationHeightPx=%{public}d bottomInsetVp=%{public}s',
+          'windowAvoidance reason=%{public}s px=%{public}d,%{public}d,%{public}d,%{public}d ' +
+          'vp=%{public}s,%{public}s,%{public}s,%{public}s',
           reason,
-          systemTopPx,
-          systemHeightPx,
-          cutoutTopPx,
-          cutoutHeightPx,
-          topInsetPx,
+          insetsPx.left,
+          insetsPx.top,
+          insetsPx.right,
+          insetsPx.bottom,
+          String(this.leftAvoidInset),
           String(this.topAvoidInset),
-          navigationHeightPx,
+          String(this.rightAvoidInset),
           String(this.bottomAvoidInset));
       };
       updateAvoidInsets('initial-window-ready');
@@ -5076,8 +5114,28 @@ export struct BrowserShell {
     this.springBackAddressGesture();
   }
 
-  private bottomBrowserBarHeight(): number {
+  private bottomBrowserBarSurfaceHeight(): number {
     return SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + Math.max(0, this.bottomAvoidInset);
+  }
+
+  private bottomBrowserBarHeight(): number {
+    return this.bottomBrowserBarSurfaceHeight() + SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP;
+  }
+
+  private browserChromeFrame(): BrowserChromeLayoutFrame {
+    // CENTER is today's policy. START and END remain model-level options for
+    // a future left/right handed grip preference without changing this tree.
+    return browserChromeLayoutFrame(
+      this.viewportWidth,
+      this.leftAvoidInset,
+      this.rightAvoidInset,
+      BrowserChromeAnchor.CENTER
+    );
+  }
+
+  private browserChromeCenterOffset(): number {
+    const frame: BrowserChromeLayoutFrame = this.browserChromeFrame();
+    return frame.left + frame.width / 2 - this.viewportWidth / 2;
   }
 
   private startPageCustomizeSqueezePhase(): number {
@@ -5174,13 +5232,16 @@ export struct BrowserShell {
   }
 
   private overviewChromeFrameForRender(): TabOverviewChromeFrame {
+    const chromeFrame: BrowserChromeLayoutFrame = this.browserChromeFrame();
     return tabOverviewChromeFrame(
       this.overviewProgress,
       this.overviewClosing || this.overviewAnimationClosing,
       this.viewportWidth,
       this.viewportHeight,
       this.bottomBrowserBarHeight(),
-      this.overviewPageFrameForRender()
+      this.overviewPageFrameForRender(),
+      chromeFrame.left,
+      chromeFrame.width
     );
   }
 
@@ -5359,7 +5420,7 @@ export struct BrowserShell {
           // overview unmounts, leaving ArkWeb visible but non-interactive.
           // The capsule itself remains the only event receiver and still owns
           // the Block hierarchy hit-test.
-          Stack() {
+          Stack({ alignContent: Alignment.Top }) {
             BottomBrowserBar({
               tabs: this.sceneTabs,
               pendingTab: this.pendingTabForRender(),
@@ -5370,7 +5431,7 @@ export struct BrowserShell {
               tabCount: this.tabStore.tabs.length,
               isPrivate: this.sceneTabForRender()?.isPrivate ?? false,
               displayDragX: this.displayDragXForRender(),
-              viewportWidth: this.viewportWidth,
+              viewportWidth: this.browserChromeFrame().width,
               interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
                 this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
               bottomInset: this.bottomAvoidInset,
@@ -5438,12 +5499,17 @@ export struct BrowserShell {
             })
               .id('floating-tab-bar')
               .width('100%')
-              .height(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + this.bottomAvoidInset)
+              .height(this.bottomBrowserBarSurfaceHeight())
               .zIndex(10);
           }
             .id('floating-tab-bar-position-layer')
-            .width('100%')
+            .width(this.browserChromeFrame().width)
             .height(this.bottomBrowserBarHeight())
+            .padding({
+              left: SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
+              right: SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
+              bottom: SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP
+            })
             .align(Alignment.Bottom)
             // The overview release animator drives this transform through the
             // same progress as the live page. Entry moves the bar downward;
@@ -5455,7 +5521,7 @@ export struct BrowserShell {
               z: 1
             })
             .translate({
-              x: 0,
+              x: this.browserChromeCenterOffset(),
               y: this.overviewChromeFrameForRender().toolbarTranslateY +
                 this.startPageCustomizeSqueezeTranslateY(),
               z: 0
@@ -5517,7 +5583,10 @@ export struct BrowserShell {
             // BrowserTransitionScene. Do not add a second mount transition to
             // the card grid or it will drift away from the live page.
             .transition(TransitionEffect.IDENTITY)
-            .zIndex(tabOverviewGridZIndex())
+            .zIndex(tabOverviewGridZIndex(
+              this.overviewProgress,
+              this.overviewClosing || this.overviewAnimationClosing
+            ))
         }
 
         // The address capsule remains one mounted node while it leaves the

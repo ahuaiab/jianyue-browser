@@ -200,7 +200,7 @@ export default function safariTabTransitionTest() {
     });
 
     it('keeps address capsule corners aligned with the bottom chrome', 0, () => {
-      expect(safariAddressItemWidth(400)).assertEqual(384);
+      expect(safariAddressItemWidth(400)).assertEqual(368);
     });
 
     it('primes a render-only pending tab before a final-tab gesture moves', 0, () => {

@@ -135,15 +135,22 @@ import {
   SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS,
   SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_ITEM_INSET_VP,
+  SAFARI_ADDRESS_ITEM_SURFACE_INSET_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
   SAFARI_ADDRESS_ROW_HEIGHT_VP,
   SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
+  SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP,
+  SAFARI_BOTTOM_CHROME_FALLBACK_COLOR,
+  SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
+  SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
   SAFARI_BOTTOM_CHROME_RADIUS_VP,
   SAFARI_BOTTOM_CHROME_RAIL_INSET_VP,
+  safariAddressTrackClipFrame,
   safariAddressItemWidth,
   safariBottomChromeActionCenter,
   safariBottomChromeActionSlotWidth,
-  safariBottomChromeRailWidth
+  safariBottomChromeRailWidth,
+  safariBottomChromeSurfaceWidth
 } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 import {
   NEW_TAB_PULL_READY_DISTANCE,
@@ -914,29 +921,54 @@ export default function videoParityModelsTest() {
       expect(renderer.kind).assertEqual(BrowserLifecycleEventKind.RENDERER_EXITED);
     });
 
-    it('aligns the address field and five bottom actions to the outer chrome', 0, () => {
+    it('aligns the address field and five bottom actions inside the floating chrome', 0, () => {
       expect(ADDRESS_SEARCH_BAR_TOP_PADDING).assertEqual(8);
       expect(SAFARI_ADDRESS_ITEM_GAP_VP).assertEqual(10);
       expect(SAFARI_ADDRESS_ROW_HEIGHT_VP).assertEqual(56);
       expect(SAFARI_ACTION_TOOLBAR_HEIGHT_VP).assertEqual(48);
       expect(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP).assertEqual(104);
       expect(SAFARI_BOTTOM_CHROME_RADIUS_VP).assertEqual(HARMONY_RADIUS_FLOATING);
-      expect(SAFARI_ADDRESS_ITEM_INSET_VP).assertEqual(8);
+      expect(SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP).assertEqual(8);
+      expect(SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP).assertEqual(8);
+      expect(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR).assertEqual('#FFF2F2F7');
+      expect(SAFARI_BOTTOM_CHROME_MATERIAL_COLOR).assertEqual('#E6F2F2F7');
+      expect(SAFARI_ADDRESS_ITEM_SURFACE_INSET_VP).assertEqual(8);
+      expect(SAFARI_ADDRESS_ITEM_INSET_VP).assertEqual(16);
       expect(SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS).assertEqual(180);
       expect(SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS).assertEqual(52);
       expect(SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS).assertEqual(420);
       expect(SAFARI_BOTTOM_CHROME_RAIL_INSET_VP).assertEqual(20);
 
       const viewportWidth: number = 400;
-      expect(safariAddressItemWidth(viewportWidth)).assertEqual(384);
-      expect(safariAddressItemWidth(364)).assertEqual(348);
-      expect(safariBottomChromeRailWidth(viewportWidth)).assertEqual(360);
-      expect(safariBottomChromeActionSlotWidth(viewportWidth)).assertEqual(72);
-      expect(safariBottomChromeActionCenter(0, viewportWidth)).assertEqual(56);
-      expect(safariBottomChromeActionCenter(1, viewportWidth)).assertEqual(128);
-      expect(safariBottomChromeActionCenter(2, viewportWidth)).assertEqual(200);
-      expect(safariBottomChromeActionCenter(3, viewportWidth)).assertEqual(272);
-      expect(safariBottomChromeActionCenter(4, viewportWidth)).assertEqual(344);
+      expect(safariBottomChromeSurfaceWidth(viewportWidth)).assertEqual(384);
+      expect(safariAddressItemWidth(viewportWidth)).assertEqual(368);
+      expect(safariAddressItemWidth(364)).assertEqual(332);
+      expect(safariBottomChromeRailWidth(viewportWidth)).assertEqual(344);
+      expect(safariBottomChromeActionSlotWidth(viewportWidth).toFixed(1)).assertEqual('68.8');
+      expect(safariBottomChromeActionCenter(0, viewportWidth).toFixed(1)).assertEqual('62.4');
+      expect(safariBottomChromeActionCenter(1, viewportWidth).toFixed(1)).assertEqual('131.2');
+      expect(safariBottomChromeActionCenter(2, viewportWidth).toFixed(1)).assertEqual('200.0');
+      expect(safariBottomChromeActionCenter(3, viewportWidth).toFixed(1)).assertEqual('268.8');
+      expect(safariBottomChromeActionCenter(4, viewportWidth).toFixed(1)).assertEqual('337.6');
+    });
+
+    it('clips horizontal address visuals to the floating chrome and releases overview motion', 0, () => {
+      const horizontal = safariAddressTrackClipFrame(400, false);
+      expect(horizontal.left).assertEqual(8);
+      expect(horizontal.width).assertEqual(384);
+      expect(horizontal.topRadius).assertEqual(20);
+
+      const overview = safariAddressTrackClipFrame(400, true);
+      expect(overview.left).assertEqual(0);
+      expect(overview.width).assertEqual(400);
+      expect(overview.topRadius).assertEqual(0);
+
+      const narrowHorizontal = safariAddressTrackClipFrame(364, false);
+      expect(narrowHorizontal.left).assertEqual(8);
+      expect(narrowHorizontal.width).assertEqual(348);
+      const narrowOverview = safariAddressTrackClipFrame(364, true);
+      expect(narrowOverview.left).assertEqual(0);
+      expect(narrowOverview.width).assertEqual(364);
     });
 
     it('keeps current and adjacent pages in transient geometry during a drag', 0, () => {

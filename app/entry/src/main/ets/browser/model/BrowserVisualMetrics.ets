@@ -48,25 +48,117 @@ export const SAFARI_ACTION_TOOLBAR_HEIGHT_VP: number = 48;
 export const SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP: number =
   SAFARI_ADDRESS_ROW_HEIGHT_VP + SAFARI_ACTION_TOOLBAR_HEIGHT_VP;
 export const SAFARI_BOTTOM_CHROME_RADIUS_VP: number = HARMONY_RADIUS_FLOATING;
+/** Keep the native material surface clear of the physical screen edge. */
+export const SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP: number = 8;
+export const SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP: number = 8;
+/** Visible base colors for the floating chrome; the material tint stays below full opacity. */
+export const SAFARI_BOTTOM_CHROME_FALLBACK_COLOR: string = '#FFF2F2F7';
+export const SAFARI_BOTTOM_CHROME_MATERIAL_COLOR: string = '#E6F2F2F7';
 /** The lower action row follows the outer surface's corner centers. */
 export const SAFARI_BOTTOM_CHROME_RAIL_INSET_VP: number = SAFARI_BOTTOM_CHROME_RADIUS_VP;
 /**
- * The address capsule's 12vp corner radius is placed 8vp inside the outer
- * 20vp bottom-chrome radius, so both rounded corners share the same center.
+ * The address capsule sits 8vp inside the already-inset material surface.
+ * Its 12vp corner radius then shares a center with the outer 20vp radius.
  */
-export const SAFARI_ADDRESS_ITEM_INSET_VP: number = 8;
+export const SAFARI_ADDRESS_ITEM_SURFACE_INSET_VP: number = 8;
+export const SAFARI_ADDRESS_ITEM_INSET_VP: number =
+  SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP + SAFARI_ADDRESS_ITEM_SURFACE_INSET_VP;
 /** Reserve room for the security control before collapsed web-address text. */
 export const SAFARI_ADDRESS_LOCK_SAFE_INSET_VP: number = 40;
 /** Keep focused address text and the native caret inside the capsule edge. */
 export const SAFARI_ADDRESS_EDITOR_SAFE_INSET_VP: number = 16;
 export const SAFARI_BOTTOM_CHROME_ACTION_COUNT: number = 5;
+/**
+ * Ergonomic width of the combined address/toolbar surface. Wide windows keep
+ * the portrait reach instead of stretching controls across the whole screen.
+ */
+export const SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP: number = 400;
+
+/** Reserved placement policy for a later handedness/grip preference. */
+export enum BrowserChromeAnchor {
+  START,
+  CENTER,
+  END
+}
+
+export interface BrowserChromeLayoutFrame {
+  left: number;
+  width: number;
+}
 
 function finiteVisualMetric(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-export function safariBottomChromeRailWidth(viewportWidth: number): number {
+/**
+ * Place the fixed-width browser chrome inside the horizontal safe region.
+ * Narrow and split windows may shrink it, but a wide/rotated window never
+ * stretches it beyond the portrait design width.
+ */
+export function browserChromeLayoutFrame(
+  viewportWidth: number,
+  leftAvoidInset: number = 0,
+  rightAvoidInset: number = 0,
+  anchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER
+): BrowserChromeLayoutFrame {
+  const safeViewportWidth: number = Math.max(1, finiteVisualMetric(viewportWidth));
+  const requestedLeft: number = Math.max(0, finiteVisualMetric(leftAvoidInset));
+  const safeLeft: number = Math.min(requestedLeft, Math.max(0, safeViewportWidth - 1));
+  const requestedRight: number = Math.max(0, finiteVisualMetric(rightAvoidInset));
+  const safeRight: number = Math.min(
+    requestedRight,
+    Math.max(0, safeViewportWidth - safeLeft - 1)
+  );
+  const availableWidth: number = Math.max(1, safeViewportWidth - safeLeft - safeRight);
+  const width: number = Math.min(SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP, availableWidth);
+  let left: number = safeLeft + (availableWidth - width) / 2;
+  if (anchor === BrowserChromeAnchor.START) {
+    left = safeLeft;
+  } else if (anchor === BrowserChromeAnchor.END) {
+    left = safeViewportWidth - safeRight - width;
+  }
+  return { left, width };
+}
+
+export function safariBottomChromeSurfaceWidth(viewportWidth: number): number {
   return Math.max(1, finiteVisualMetric(viewportWidth) -
+    SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP * 2);
+}
+
+export interface SafariAddressTrackClipFrame {
+  left: number;
+  width: number;
+  topRadius: number;
+}
+
+/**
+ * Paint-only bounds for the shared address track.
+ *
+ * Horizontal tab motion stays inside the floating bottom chrome. During the
+ * overview morph the address track instead owns its compact transition frame,
+ * so it must be released from the bottom-chrome inset and rounded corners.
+ */
+export function safariAddressTrackClipFrame(
+  layoutWidth: number,
+  overviewTransitionActive: boolean
+): SafariAddressTrackClipFrame {
+  const safeWidth: number = Math.max(1, finiteVisualMetric(layoutWidth));
+  if (overviewTransitionActive) {
+    return {
+      left: 0,
+      width: safeWidth,
+      topRadius: 0
+    };
+  }
+  return {
+    left: SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
+    width: safariBottomChromeSurfaceWidth(safeWidth),
+    topRadius: SAFARI_BOTTOM_CHROME_RADIUS_VP
+  };
+}
+
+export function safariBottomChromeRailWidth(viewportWidth: number): number {
+  return Math.max(1, safariBottomChromeSurfaceWidth(viewportWidth) -
     SAFARI_BOTTOM_CHROME_RAIL_INSET_VP * 2);
 }
 
@@ -84,7 +176,7 @@ export function safariBottomChromeActionCenter(index: number, viewportWidth: num
     SAFARI_BOTTOM_CHROME_ACTION_COUNT - 1,
     Math.trunc(finiteVisualMetric(index))
   ));
-  return SAFARI_BOTTOM_CHROME_RAIL_INSET_VP +
+  return SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP + SAFARI_BOTTOM_CHROME_RAIL_INSET_VP +
     safariBottomChromeActionSlotWidth(viewportWidth) * (boundedIndex + 0.5);
 }
 

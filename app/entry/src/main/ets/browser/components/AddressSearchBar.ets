@@ -517,13 +517,10 @@ export struct AddressSearchBar {
           .layoutWeight(1)
           .height(ADDRESS_SEARCH_BAR_STYLE.height)
           .padding({ left: 9, right: 9 })
-          .backgroundColor(Color.White)
+          .backgroundColor('#BFFFFFFF')
           .borderRadius(ADDRESS_SEARCH_BAR_STYLE.cornerRadius)
           .border({ width: this.addressInputFocused ? 0 : 1,
             color: this.addressInputFocused ? '#00000000' : '#55FFFFFF' })
-          .shadow(this.addressInputFocused
-            ? { radius: 8, color: '#18000000', offsetX: 0, offsetY: 1 }
-            : { radius: 12, color: '#24000000', offsetX: 0, offsetY: 2 })
           // The unfocused state is display-only, so the field itself can own
           // taps without mounting a native TextInput or exposing selection
           // handles. The parent PanGesture below still receives horizontal
