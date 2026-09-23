@@ -259,7 +259,11 @@ export function searchQueryForUrl(url: string): string | undefined {
  * ordinary pages use the shortened URL authority so the compact chrome does
  * not expose a long path or fall back to a generic page title.
  */
-export function addressBarLabelFor(url: string, title: string): string {
+export function addressBarLabelFor(url: string, title: string, preferredLabel: string = ''): string {
+  const normalizedPreferredLabel: string = preferredLabel.trim();
+  if (normalizedPreferredLabel.length > 0) {
+    return normalizedPreferredLabel;
+  }
   const normalizedUrl: string = url.trim();
   if (normalizedUrl.length === 0 || normalizedUrl === 'about:blank') {
     return '搜索或输入网站';
@@ -353,6 +357,33 @@ export function loadableUrlFor(value: string): string | undefined {
   return validation.valid ? validation.normalizedUrl : undefined;
 }
 
+function isBareIpv4Address(value: string): boolean {
+  const authority: string = value.split('/')[0].split('?')[0].split('#')[0];
+  const hostAndPort: string[] = authority.split(':');
+  if (hostAndPort.length > 2) {
+    return false;
+  }
+
+  const octets: string[] = hostAndPort[0].split('.');
+  if (octets.length !== 4) {
+    return false;
+  }
+  for (let index: number = 0; index < octets.length; index++) {
+    const octet: string = octets[index];
+    if (!/^\d{1,3}$/.test(octet) || Number(octet) > 255) {
+      return false;
+    }
+  }
+
+  if (hostAndPort.length === 2) {
+    const port: string = hostAndPort[1];
+    if (!/^\d{1,5}$/.test(port) || Number(port) > 65535) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Keep the address shown in the UI separate from the URL sent to ArkWeb. */
 export function displayUrlFor(value: string): string {
   const normalized: string = value.trim();
@@ -427,6 +458,12 @@ export function normalizeAddressInput(
   const explicitUrl: string | undefined = loadableUrlFor(value);
   if (explicitUrl !== undefined) {
     return explicitUrl;
+  }
+  if (isBareIpv4Address(value)) {
+    const ipv4Url: string = `http://${value}`;
+    if (loadableUrlFor(ipv4Url) !== undefined) {
+      return ipv4Url;
+    }
   }
   if (!value.includes(' ') && value.includes('.')) {
     const hostnameUrl: string = `https://${value}`;

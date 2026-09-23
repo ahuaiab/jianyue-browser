@@ -1,10 +1,15 @@
 import {
   BuilderNode, FrameNode, NodeController, UIContext
 } from '@kit.ArkUI';
+import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
 import { BrowserTabRecord, lastValidUrlForTab, TabId } from '../model/BrowserTypes';
 import { shouldRetryWebHostAttachment } from '../model/BrowserInteraction';
+import {
+  ExternalAppLinkLauncher,
+  interceptExternalAppNavigation
+} from './ExternalAppNavigation';
 import { WebRuntimeFactory, WebRuntimeHandle } from './WebTabPool';
 import {
   WebGeolocationEventPort,
@@ -36,7 +41,9 @@ export interface WebDownloadObserver {
 export interface WebPageLifecycleObserver {
   onPageBegin(tabId: TabId, controller: webview.WebviewController, url: string): void;
   onPageEnd(tabId: TabId, controller: webview.WebviewController): void;
+  onScroll(tabId: TabId, controller: webview.WebviewController, yOffset: number): void;
   onTitleReceive(tabId: TabId, controller: webview.WebviewController, title: string): void;
+  onFaviconReceived(tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap): void;
   onError(tabId: TabId, controller: webview.WebviewController, diagnostic: WebLoadError): void;
   onSslError(tabId: TabId, controller: webview.WebviewController, diagnostic: WebSslError): void;
   onRenderExited(tabId: TabId, controller: webview.WebviewController): boolean;
@@ -69,7 +76,10 @@ class WebBuildData {
   readonly isPrivate: boolean;
   readonly onPageBegin: (url: string) => void;
   readonly onPageEnd: () => void;
+  readonly onScroll: (yOffset: number) => void;
   readonly onTitleReceive: (title: string) => void;
+  readonly onFaviconReceived: (favicon: image.PixelMap) => void;
+  readonly onExternalNavigation: (uri: string) => boolean;
   readonly onError: (diagnostic: WebLoadError) => void;
   readonly onSslError: (diagnostic: WebSslError) => void;
   readonly onRenderExited: () => boolean;
@@ -94,14 +104,20 @@ class WebBuildData {
     onFullScreenExit: () => void = () => undefined,
     downloadDelegate: webview.WebDownloadDelegate | undefined = undefined,
     onPageBegin: (url: string) => void = (_url: string) => undefined,
-    permissionHandler: WebPermissionRequestHandler | undefined = undefined
+    permissionHandler: WebPermissionRequestHandler | undefined = undefined,
+    onScroll: (yOffset: number) => void = (_yOffset: number) => undefined,
+    onFaviconReceived: (favicon: image.PixelMap) => void = (_favicon: image.PixelMap) => undefined,
+    onExternalNavigation: (uri: string) => boolean = (_uri: string) => false
   ) {
     this.url = url;
     this.controller = controller;
     this.isPrivate = isPrivate;
     this.onPageBegin = onPageBegin;
+    this.onScroll = onScroll;
     this.onPageEnd = onPageEnd;
     this.onTitleReceive = onTitleReceive;
+    this.onFaviconReceived = onFaviconReceived;
+    this.onExternalNavigation = onExternalNavigation;
     this.onError = onError;
     this.onSslError = onSslError;
     this.onRenderExited = onRenderExited;
@@ -196,13 +212,26 @@ function buildWebNode(data: WebBuildData) {
     .domStorageAccess(true)
     .multiWindowAccess(true)
     .geolocationAccess(true)
+    .onLoadIntercept((event) => {
+      const request = event?.data;
+      if (request === undefined) {
+        return false;
+      }
+      return data.onExternalNavigation(request.getRequestUrl());
+    })
     .onPageBegin((event) => data.onPageBegin(event?.url ?? ''))
     .onRefreshAccessedHistory((event) => data.onPageBegin(event?.url ?? ''))
     .onPageEnd(() => {
       data.installDownloadDelegate();
       data.onPageEnd();
     })
+    .onScroll((event) => data.onScroll(event?.yOffset ?? 0))
     .onTitleReceive((event) => data.onTitleReceive(event?.title ?? ''))
+    .onFaviconReceived((event) => {
+      if (event?.favicon !== undefined) {
+        data.onFaviconReceived(event.favicon);
+      }
+    })
     .onErrorReceive((event) => {
       const request = event?.request;
       const error = event?.error;
@@ -355,17 +384,20 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
   private readonly downloadHandler: WebDownloadHandler | undefined;
   private readonly runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined;
   private readonly permissionHandler: WebPermissionRequestHandler | undefined;
+  private readonly externalAppLinkLauncher: ExternalAppLinkLauncher | undefined;
   private runtimeSequence: number = 0;
 
   constructor(uiContext: UIContext, observer: WebPageLifecycleObserver | undefined = undefined,
     downloadHandler: WebDownloadHandler | string | undefined = undefined,
     runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined,
-    permissionHandler: WebPermissionRequestHandler | undefined = undefined) {
+    permissionHandler: WebPermissionRequestHandler | undefined = undefined,
+    externalAppLinkLauncher: ExternalAppLinkLauncher | undefined = undefined) {
     this.uiContext = uiContext;
     this.observer = observer;
     this.downloadHandler = typeof downloadHandler === 'string' ? undefined : downloadHandler;
     this.runtimeCreatedObserver = runtimeCreatedObserver;
     this.permissionHandler = permissionHandler;
+    this.externalAppLinkLauncher = externalAppLinkLauncher;
   }
 
   create(tab: BrowserTabRecord): WebRuntimeHandle {
@@ -380,8 +412,20 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     const onPageEnd: () => void = () => {
       this.observer?.onPageEnd(tab.id, controller);
     };
+    const onScroll: (yOffset: number) => void = (yOffset: number) => {
+      this.observer?.onScroll(tab.id, controller, yOffset);
+    };
     const onTitleReceive: (title: string) => void = (title: string) => {
       this.observer?.onTitleReceive(tab.id, controller, title);
+    };
+    const onFaviconReceived: (favicon: image.PixelMap) => void = (favicon: image.PixelMap) => {
+      this.observer?.onFaviconReceived(tab.id, controller, favicon);
+    };
+    const onExternalNavigation: (uri: string) => boolean = (uri: string) => {
+      return interceptExternalAppNavigation(uri, this.externalAppLinkLauncher, (scheme: string) => {
+        hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+          `external-app-launch-failed scheme=${scheme}`);
+      });
     };
     const onError: (diagnostic: WebLoadError) => void = (diagnostic: WebLoadError) => {
       this.observer?.onError(tab.id, controller, diagnostic);
@@ -406,7 +450,7 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
       wrapBuilder<[WebBuildData]>(buildWebNode),
       new WebBuildData(sourceUrl, controller, tab.isPrivate, onPageEnd, onTitleReceive, onError, onSslError,
         onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin,
-        this.permissionHandler)
+        this.permissionHandler, onScroll, onFaviconReceived, onExternalNavigation)
     );
     this.runtimeCreatedObserver?.(tab.id, sourceUrl, runtimeId);
     return new ArkWebRuntimeHandle(tab.id, runtimeId, controller, builderNode);

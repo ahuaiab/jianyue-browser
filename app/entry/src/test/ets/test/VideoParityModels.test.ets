@@ -142,16 +142,33 @@ import {
   SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP,
   SAFARI_BOTTOM_CHROME_FALLBACK_COLOR,
   SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
+  SAFARI_BOTTOM_CHROME_MATERIAL_BASE_COLOR,
   SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
   SAFARI_BOTTOM_CHROME_RADIUS_VP,
   SAFARI_BOTTOM_CHROME_RAIL_INSET_VP,
   safariAddressTrackClipFrame,
   safariAddressItemWidth,
+  safariChromeSurfaceBackgroundColor,
   safariBottomChromeActionCenter,
   safariBottomChromeActionSlotWidth,
   safariBottomChromeRailWidth,
-  safariBottomChromeSurfaceWidth
+  safariBottomChromeSurfaceWidth,
+  safariBottomChromeLayoutHeight,
+  safariBottomChromePaintedHeight,
+  safariBottomChromeSurfaceTopOffset,
+  safariBottomChromeVisualHeight,
+  safariBottomChromeUnpaintedAvoidAreaHeight
 } from '../../../main/ets/browser/model/BrowserVisualMetrics';
+import {
+  SAFARI_IMMERSIVE_MATERIAL_APPLY_SHADOW,
+  SAFARI_IMMERSIVE_MATERIAL_INTERACTIVE,
+  SAFARI_IMMERSIVE_MATERIAL_LIGHT_EFFECT_COLOR,
+  SAFARI_IMMERSIVE_MATERIAL_STYLE,
+  SAFARI_IMMERSIVE_MATERIAL_TINT,
+  safariImmersiveControlMaterialIfSupported,
+  safariImmersiveMaterialSupported
+} from '../../../main/ets/browser/model/BrowserMaterial';
+import { uiMaterial } from '@kit.ArkUI';
 import {
   NEW_TAB_PULL_READY_DISTANCE,
   NEW_TAB_PULL_START,
@@ -924,14 +941,16 @@ export default function videoParityModelsTest() {
     it('aligns the address field and five bottom actions inside the floating chrome', 0, () => {
       expect(ADDRESS_SEARCH_BAR_TOP_PADDING).assertEqual(8);
       expect(SAFARI_ADDRESS_ITEM_GAP_VP).assertEqual(10);
-      expect(SAFARI_ADDRESS_ROW_HEIGHT_VP).assertEqual(56);
+      expect(SAFARI_ADDRESS_ROW_HEIGHT_VP).assertEqual(52);
       expect(SAFARI_ACTION_TOOLBAR_HEIGHT_VP).assertEqual(48);
-      expect(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP).assertEqual(104);
+      expect(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP).assertEqual(100);
       expect(SAFARI_BOTTOM_CHROME_RADIUS_VP).assertEqual(HARMONY_RADIUS_FLOATING);
       expect(SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP).assertEqual(8);
       expect(SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP).assertEqual(8);
-      expect(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR).assertEqual('#FFF2F2F7');
-      expect(SAFARI_BOTTOM_CHROME_MATERIAL_COLOR).assertEqual('#E6F2F2F7');
+      expect(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR).assertEqual(SAFARI_BOTTOM_CHROME_MATERIAL_COLOR);
+      expect(SAFARI_BOTTOM_CHROME_MATERIAL_COLOR).assertEqual('#FFF2F2F7');
+      expect(safariChromeSurfaceBackgroundColor(true)).assertEqual(SAFARI_BOTTOM_CHROME_MATERIAL_BASE_COLOR);
+      expect(safariChromeSurfaceBackgroundColor(false)).assertEqual(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR);
       expect(SAFARI_ADDRESS_ITEM_SURFACE_INSET_VP).assertEqual(8);
       expect(SAFARI_ADDRESS_ITEM_INSET_VP).assertEqual(16);
       expect(SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS).assertEqual(180);
@@ -950,6 +969,46 @@ export default function videoParityModelsTest() {
       expect(safariBottomChromeActionCenter(2, viewportWidth).toFixed(1)).assertEqual('200.0');
       expect(safariBottomChromeActionCenter(3, viewportWidth).toFixed(1)).assertEqual('268.8');
       expect(safariBottomChromeActionCenter(4, viewportWidth).toFixed(1)).assertEqual('337.6');
+    });
+
+    it('keeps the bottom edge aligned while retaining the avoid-area layout', 0, () => {
+      expect(safariBottomChromePaintedHeight())
+        .assertEqual(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP);
+      expect(safariBottomChromeLayoutHeight(36)).assertEqual(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + 20);
+      expect(safariBottomChromeUnpaintedAvoidAreaHeight(36)).assertEqual(20);
+      expect(safariBottomChromeLayoutHeight(4))
+        .assertEqual(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP);
+      expect(safariBottomChromeUnpaintedAvoidAreaHeight(4)).assertEqual(0);
+      expect(safariBottomChromeSurfaceTopOffset(36)).assertEqual(0);
+      expect(safariBottomChromeSurfaceTopOffset(4)).assertEqual(0);
+      expect(safariBottomChromeVisualHeight(36)).assertEqual(128);
+      expect(safariBottomChromeVisualHeight(4)).assertEqual(108);
+      // The address capsule consumes the complete address row, so its visual
+      // bottom is the toolbar's top rather than a second blank band.
+      expect(SAFARI_ADDRESS_ROW_HEIGHT_VP - ADDRESS_SEARCH_BAR_TOP_PADDING - 44)
+        .assertEqual(0);
+      // The dynamic avoid area is below the painted surface, keeping the
+      // system interaction indicator out of the material.
+      expect(SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP)
+        .assertEqual(SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP);
+    });
+
+    it('uses one native immersive material preset for every browser surface', 0, () => {
+      expect(SAFARI_IMMERSIVE_MATERIAL_STYLE).assertEqual(uiMaterial.ImmersiveStyle.ULTRA_THICK);
+      expect(SAFARI_IMMERSIVE_MATERIAL_TINT).assertUndefined();
+      expect(SAFARI_IMMERSIVE_MATERIAL_APPLY_SHADOW).assertTrue();
+      expect(SAFARI_IMMERSIVE_MATERIAL_INTERACTIVE).assertTrue();
+      expect(SAFARI_IMMERSIVE_MATERIAL_LIGHT_EFFECT_COLOR).assertUndefined();
+    });
+
+    it('provides the shared native material for start-page action controls', 0, () => {
+      const material: uiMaterial.ImmersiveMaterial | undefined =
+        safariImmersiveControlMaterialIfSupported();
+      if (safariImmersiveMaterialSupported()) {
+        expect(material === undefined).assertFalse();
+      } else {
+        expect(material).assertUndefined();
+      }
     });
 
     it('clips horizontal address visuals to the floating chrome and releases overview motion', 0, () => {

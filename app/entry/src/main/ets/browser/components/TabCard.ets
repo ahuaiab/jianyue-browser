@@ -1,6 +1,6 @@
 import { BrowserTabRecord, GestureSample, lastValidUrlForTab, TabId, tabOverviewTitleFor } from '../model/BrowserTypes';
 import { image } from '@kit.ImageKit';
-import { SymbolGlyphModifier, uiMaterial } from '@kit.ArkUI';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 import {
   TAB_CARD_MENU_DESTRUCTIVE_COLOR,
   TAB_CARD_MENU_LABELS,
@@ -13,6 +13,10 @@ import {
 } from '../model/TabOverviewActions';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
 import { HARMONY_RADIUS_CARD } from '../model/BrowserVisualMetrics';
+import {
+  safariImmersiveMaterialIfSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../model/BrowserMaterial';
 import { TopAlignedPixelMapImage } from './TopAlignedPixelMapImage';
 
 /**
@@ -299,14 +303,11 @@ export struct TabCard {
       .id(`tab-card-preview-${this.tab.id}`)
       .width('100%')
       .height(this.cardHeight)
-      .backgroundColor(this.tab.isPrivate ? '#F2EEFF' : '#FFFFFF')
+      .backgroundColor(safariImmersiveSurfaceBackgroundColor())
       // Apply the native immersive surface first; the active/inactive ring
       // is painted afterwards so the selected card remains an explicit blue
       // outline instead of being washed out by the material layer.
-      .systemMaterial(new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-        interactive: true
-      }))
+      .systemMaterial(safariImmersiveMaterialIfSupported())
       .borderRadius(HARMONY_RADIUS_CARD)
       .border({
         width: this.isActive ? 2 : 1,
@@ -314,8 +315,7 @@ export struct TabCard {
       })
       // Clip both children to this one outline so the thumbnail, caption and
       // close action read as a single card instead of two stacked panels.
-      .clip(true)
-      .shadow({ radius: 9, color: '#24000000', offsetX: 0, offsetY: 3 });
+      .clip(true);
     }
   }
 
@@ -385,10 +385,7 @@ export struct TabCard {
         // Keep the menu aligned with the same native immersive material used
         // by the floating browser chrome. No preview image is needed because
         // the card itself remains visible behind the menu.
-        systemMaterial: new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.THIN,
-          interactive: true
-        })
+        systemMaterial: safariImmersiveMaterialIfSupported()
       })
       .gesture(
         GestureGroup(

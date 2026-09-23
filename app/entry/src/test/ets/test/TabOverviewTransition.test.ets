@@ -136,12 +136,12 @@ export default function tabOverviewTransitionTest() {
     it('keeps the background crop stable while the live page crosses the top inset', 0, () => {
       const identity: TabOverviewPageFrame = tabOverviewPageFrame(0, 400, 800, 0, 137);
       const nearIdentity: TabOverviewPageFrame = tabOverviewPageFrame(0.001, 400, 800, 0, 137);
-      const handoffMiddle: TabOverviewPageFrame = tabOverviewPageFrame(0.04, 400, 800, 0, 137);
-      const handoffEnd: TabOverviewPageFrame = tabOverviewPageFrame(0.08, 400, 800, 0, 137);
+      const handoffMiddle: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 137);
+      const handoffEnd: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 0, 137);
       const middle: TabOverviewPageFrame = tabOverviewPageFrame(0.5, 400, 800, 0, 137);
       expect(tabOverviewLivePageContentTop(identity, 137)).assertEqual(137);
-      // The safe-area handoff must not jump to zero on the first transformed
-      // frame; the same track is used while reversing the overview.
+      // The safe-area handoff follows the entire page morph and must not jump
+      // to zero on its first transformed frame.
       const nearIdentityTop: number = tabOverviewLivePageContentTop(nearIdentity, 137);
       const handoffMiddleTop: number = tabOverviewLivePageContentTop(handoffMiddle, 137);
       expect(nearIdentityTop > 136).assertTrue();
@@ -149,7 +149,7 @@ export default function tabOverviewTransitionTest() {
       expect(handoffMiddleTop < nearIdentityTop).assertTrue();
       expect(handoffMiddleTop > 0).assertTrue();
       expect(tabOverviewLivePageContentTop(handoffEnd, 137)).assertEqual(0);
-      expect(tabOverviewLivePageContentTop(middle, 137)).assertEqual(0);
+      expect(tabOverviewLivePageContentTop(middle, 137)).assertEqual(68.5);
       expect(tabOverviewLivePageContentTop(tabOverviewPageFrame(1, 400, 800, 0, 137), 137))
         .assertEqual(0);
       expect(tabOverviewLivePageContentHeight(identity, 800, 137)).assertEqual(663);

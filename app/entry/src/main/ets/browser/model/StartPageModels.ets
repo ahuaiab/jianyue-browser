@@ -1,4 +1,8 @@
-import { HistoryRecord } from './BrowserTypes';
+import { BookmarkRecord, HistoryRecord } from './BrowserTypes';
+import {
+  SAFARI_TRANSPARENT_SURFACE_COLOR,
+  safariChromeSurfaceBackgroundColor
+} from './BrowserVisualMetrics';
 
 const START_PAGE_SYSTEM_BACKGROUND_ID: string = 'system-gradient';
 
@@ -14,6 +18,21 @@ export function startPageBackgroundSource(backgroundId: string): string | undefi
     return undefined;
   }
   return normalized;
+}
+
+/** Add a light material surface when start-page content sits over a wallpaper. */
+export function startPageContentSurfaceColor(
+  backgroundId: string,
+  immersiveMaterialSupported: boolean = false
+): string {
+  return startPageUsesImmersiveSurface(backgroundId)
+    ? safariChromeSurfaceBackgroundColor(immersiveMaterialSupported)
+    : SAFARI_TRANSPARENT_SURFACE_COLOR;
+}
+
+/** Native immersive light sensing is meaningful only when a wallpaper is mounted. */
+export function startPageUsesImmersiveSurface(backgroundId: string): boolean {
+  return startPageBackgroundSource(backgroundId) !== undefined;
 }
 
 /** A cached start-page frame is valid only for the background it captured. */
@@ -47,6 +66,86 @@ export interface StartPageItem {
   url: string;
   order: number;
   updatedAt: number;
+}
+
+/** Use the saved tile title while the destination page is still loading. */
+export function startPageItemNavigationTitle(item: StartPageItem): string {
+  const title: string = item.title.trim();
+  return title.length > 0 ? title : item.url;
+}
+
+/**
+ * Projects the bookmark library onto the start page while retaining the
+ * user's existing tile order. The bookmark library is the source of truth for
+ * title and URL; persisted start-page items only provide stable ids and order.
+ */
+export function mergeBookmarkedStartPageItems(
+  existingItems: StartPageItem[],
+  bookmarks: BookmarkRecord[]
+): StartPageItem[] {
+  const currentBookmarks: BookmarkRecord[] = [];
+  const seenUrls: Set<string> = new Set();
+  for (const record of bookmarks) {
+    const url: string = record.url.trim();
+    if (url.length === 0 || seenUrls.has(url)) {
+      continue;
+    }
+    seenUrls.add(url);
+    currentBookmarks.push({
+      url,
+      title: record.title.trim(),
+      createdAt: record.createdAt
+    });
+  }
+
+  const bookmarkByUrl: Map<string, BookmarkRecord> = new Map();
+  currentBookmarks.forEach((record: BookmarkRecord) => bookmarkByUrl.set(record.url, record));
+
+  const existingFavorites: StartPageItem[] = sortStartPageItems(existingItems.filter(
+    (item: StartPageItem) => item.type === StartPageItemType.FAVORITE
+  ));
+  const mergedFavorites: StartPageItem[] = [];
+  const mergedUrls: Set<string> = new Set();
+
+  // Preserve the order the user already established in the editor.
+  for (const item of existingFavorites) {
+    const url: string = item.url.trim();
+    const record: BookmarkRecord | undefined = bookmarkByUrl.get(url);
+    if (record === undefined || mergedUrls.has(url)) {
+      continue;
+    }
+    mergedUrls.add(url);
+    mergedFavorites.push({
+      id: item.id,
+      type: StartPageItemType.FAVORITE,
+      title: record.title.length > 0 ? record.title : record.url,
+      url: record.url,
+      order: mergedFavorites.length,
+      updatedAt: record.createdAt
+    });
+  }
+
+  // New library bookmarks are appended instead of reordering existing tiles.
+  for (const record of currentBookmarks) {
+    if (mergedUrls.has(record.url)) {
+      continue;
+    }
+    mergedUrls.add(record.url);
+    mergedFavorites.push({
+      id: `bookmark-${encodeURIComponent(record.url)}`,
+      type: StartPageItemType.FAVORITE,
+      title: record.title.length > 0 ? record.title : record.url,
+      url: record.url,
+      order: mergedFavorites.length,
+      updatedAt: record.createdAt
+    });
+  }
+
+  // Keep other future start-page sections intact; each section owns its order.
+  const otherItems: StartPageItem[] = sortStartPageItems(existingItems.filter(
+    (item: StartPageItem) => item.type !== StartPageItemType.FAVORITE
+  ));
+  return [...mergedFavorites, ...otherItems];
 }
 
 export function copyStartPageItem(item: StartPageItem): StartPageItem {

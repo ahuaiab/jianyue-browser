@@ -1,4 +1,5 @@
 import { BookmarkRecord, HistoryRecord } from './BrowserTypes';
+import { pageIconPathForUrl, PageIconRecord } from './PageIconModels';
 
 /** The two native library views retained by the browser. */
 export enum LibrarySection {
@@ -132,6 +133,7 @@ export interface LibraryEntry {
   title: string;
   url: string;
   timestamp: number;
+  iconPath?: string;
 }
 
 /** Keep a library row attached to the same UI node while neighboring rows change. */
@@ -154,7 +156,8 @@ function copyEntry(entry: LibraryEntry): LibraryEntry {
     section: entry.section,
     title: entry.title,
     url: entry.url,
-    timestamp: entry.timestamp
+    timestamp: entry.timestamp,
+    iconPath: entry.iconPath
   };
 }
 
@@ -166,23 +169,25 @@ function validEntry(entry: LibraryEntry): boolean {
     Number.isFinite(entry.timestamp);
 }
 
-function historyToEntries(records: HistoryRecord[]): LibraryEntry[] {
+function historyToEntries(records: HistoryRecord[], pageIcons: PageIconRecord[]): LibraryEntry[] {
   return records.map((record: HistoryRecord): LibraryEntry => ({
     id: `history-${record.visitedAt}-${record.url}`,
     section: LibrarySection.HISTORY,
     title: record.title,
     url: record.url,
-    timestamp: record.visitedAt
+    timestamp: record.visitedAt,
+    iconPath: pageIconPathForUrl(pageIcons, record.url)
   }));
 }
 
-function bookmarksToEntries(records: BookmarkRecord[]): LibraryEntry[] {
+function bookmarksToEntries(records: BookmarkRecord[], pageIcons: PageIconRecord[]): LibraryEntry[] {
   return records.map((record: BookmarkRecord, index: number): LibraryEntry => ({
     id: `bookmark-${index}-${record.url}`,
     section: LibrarySection.BOOKMARKS,
     title: record.title,
     url: record.url,
-    timestamp: record.createdAt
+    timestamp: record.createdAt,
+    iconPath: pageIconPathForUrl(pageIcons, record.url)
   }));
 }
 
@@ -190,13 +195,14 @@ function bookmarksToEntries(records: BookmarkRecord[]): LibraryEntry[] {
 export function libraryEntries(
   section: LibrarySection,
   history: HistoryRecord[],
-  bookmarks: BookmarkRecord[]
+  bookmarks: BookmarkRecord[],
+  pageIcons: PageIconRecord[] = []
 ): LibraryEntry[] {
   let entries: LibraryEntry[] = [];
   if (section === LibrarySection.HISTORY) {
-    entries = historyToEntries(history);
+    entries = historyToEntries(history, pageIcons);
   } else if (section === LibrarySection.BOOKMARKS) {
-    entries = bookmarksToEntries(bookmarks);
+    entries = bookmarksToEntries(bookmarks, pageIcons);
   }
   return entries.filter((entry: LibraryEntry) => validEntry(entry)).map((entry: LibraryEntry) => copyEntry(entry));
 }
@@ -259,7 +265,11 @@ function timelineTitle(section: HistoryTimelineSection): string {
   return '更早';
 }
 
-export function historyTimelineGroups(records: HistoryRecord[], now: number): HistoryTimelineGroup[] {
+export function historyTimelineGroups(
+  records: HistoryRecord[],
+  now: number,
+  pageIcons: PageIconRecord[] = []
+): HistoryTimelineGroup[] {
   const order: HistoryTimelineSection[] = [
     HistoryTimelineSection.TODAY,
     HistoryTimelineSection.YESTERDAY,
@@ -268,7 +278,7 @@ export function historyTimelineGroups(records: HistoryRecord[], now: number): Hi
   ];
   const buckets: Map<HistoryTimelineSection, LibraryEntry[]> = new Map();
   order.forEach((section: HistoryTimelineSection) => buckets.set(section, []));
-  const entries: LibraryEntry[] = libraryEntries(LibrarySection.HISTORY, records, []);
+  const entries: LibraryEntry[] = libraryEntries(LibrarySection.HISTORY, records, [], pageIcons);
   entries.forEach((entry: LibraryEntry) => {
     const section: HistoryTimelineSection = historyTimelineSection(entry.timestamp, now);
     buckets.get(section)?.push(copyEntry(entry));

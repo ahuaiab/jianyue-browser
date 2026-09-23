@@ -1,4 +1,8 @@
-import { curves, uiMaterial } from '@kit.ArkUI';
+import { curves } from '@kit.ArkUI';
+import {
+  safariImmersiveMaterialIfSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../model/BrowserMaterial';
 import {
   availableBrowserSearchEngines,
   BrowserSearchEngine,
@@ -9,8 +13,10 @@ import {
   normalizeCustomSearchEngine
 } from '../model/BrowserSettings';
 import { searchEngineLabel } from '../model/BrowserTypes';
-import { copyStartPageItem, sortStartPageItems, StartPageItem, StartPageItemType } from '../model/StartPageModels';
 import {
+  BrowserChromeAnchor,
+  browserChromeSurfaceFrame,
+  browserChromeSurfaceHorizontalOffset,
   HARMONY_RADIUS_CARD,
   HARMONY_RADIUS_SHEET,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
@@ -19,20 +25,20 @@ import {
 } from '../model/BrowserVisualMetrics';
 
 /**
- * Native start-page editor.  The video exposes switches and reorder handles;
- * this sheet keeps those actions local to the app and deliberately omits the
- * excluded Reading List and Tab Groups entries.
+ * Native start-page editor.  This sheet owns section-level settings only;
+ * bookmark entries and their ordering remain in the bookmark page.
  */
 @ComponentV2
 export struct StartPageCustomizeSheet {
   @Param settings: BrowserSettings = DEFAULT_BROWSER_SETTINGS;
-  @Param items: StartPageItem[] = [];
   @Param topInset: number = 0;
   @Param bottomInset: number = 0;
+  @Param viewportWidth: number = 400;
+  @Param leftInset: number = 0;
+  @Param rightInset: number = 0;
+  @Param chromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
   @Param onSettingsChange: (settings: BrowserSettings) => void =
     (_settings: BrowserSettings) => undefined;
-  @Param onItemsChange: (items: StartPageItem[]) => void =
-    (_items: StartPageItem[]) => undefined;
   @Param onSelectBackground: () => void = () => undefined;
   @Param onAdjustBackground: () => void = () => undefined;
   @Param onClose: () => void = () => undefined;
@@ -43,15 +49,8 @@ export struct StartPageCustomizeSheet {
   @Local customEngineNameDraft: string = '';
   @Local customEngineUrlDraft: string = '';
   @Local customEngineError: string = '';
-  @Local swipeItemId: string = '';
-  @Local swipeOffsetY: number = 0;
-  private swipeFinished: boolean = false;
   @Local sheetOffsetY: number = 0;
   private sheetSwipeFinished: boolean = false;
-  @Local reorderItemId: string = '';
-  @Local reorderOffsetY: number = 0;
-  private reorderTracking: boolean = false;
-  private reorderLongPressTriggered: boolean = false;
 
   private safeTopInset(): number {
     // The sheet itself is aligned to the bottom of an immersive window. Keep
@@ -61,6 +60,24 @@ export struct StartPageCustomizeSheet {
     // close to its rounded top edge instead of reserving a second full safe
     // area inside the sheet.
     return Math.max(0, Math.min(this.topInset, 4));
+  }
+
+  private sheetWidth(): number {
+    return browserChromeSurfaceFrame(
+      this.viewportWidth,
+      this.leftInset,
+      this.rightInset,
+      this.chromeAnchor
+    ).width;
+  }
+
+  private sheetHorizontalOffset(): number {
+    return browserChromeSurfaceHorizontalOffset(
+      this.viewportWidth,
+      this.leftInset,
+      this.rightInset,
+      this.chromeAnchor
+    );
   }
 
   private settingWith(
@@ -152,142 +169,6 @@ export struct StartPageCustomizeSheet {
     this.updateSettings(next);
     this.customEngineError = '';
     this.customEngineEditorVisible = false;
-  }
-
-  private editableItems(): StartPageItem[] {
-    // History/frequently-visited records are intentionally not managed from
-    // the custom start page. Only explicit favorites are user-owned tiles.
-    return sortStartPageItems(this.items.filter((item: StartPageItem) =>
-      item.type === StartPageItemType.FAVORITE));
-  }
-
-  private itemPosition(item: StartPageItem): number {
-    return this.editableItems().findIndex((candidate: StartPageItem) => candidate.id === item.id);
-  }
-
-  private moveItem(item: StartPageItem, direction: number): void {
-    const all: StartPageItem[] = this.items.map((candidate: StartPageItem) => copyStartPageItem(candidate));
-    const sameType: StartPageItem[] = sortStartPageItems(all.filter((candidate: StartPageItem) =>
-      candidate.type === item.type));
-    const index: number = sameType.findIndex((candidate: StartPageItem) => candidate.id === item.id);
-    const target: number = index + direction;
-    if (index < 0 || target < 0 || target >= sameType.length) {
-      return;
-    }
-    const firstOrder: number = sameType[index].order;
-    sameType[index].order = sameType[target].order;
-    sameType[target].order = firstOrder;
-    const orderById: Map<string, number> = new Map();
-    sameType.forEach((candidate: StartPageItem) => orderById.set(candidate.id, candidate.order));
-    const reordered: StartPageItem[] = all.map((candidate: StartPageItem) => {
-      const next: StartPageItem = copyStartPageItem(candidate);
-      next.order = orderById.get(candidate.id) ?? candidate.order;
-      return next;
-    });
-    this.onItemsChange(sortStartPageItems(reordered));
-  }
-
-  private beginReorder(item: StartPageItem): void {
-    this.reorderItemId = item.id;
-    this.reorderOffsetY = 0;
-    this.reorderTracking = true;
-    this.reorderLongPressTriggered = false;
-  }
-
-  private markReorderLongPress(item: StartPageItem): void {
-    if (!this.reorderTracking || this.reorderItemId !== item.id) {
-      return;
-    }
-    this.reorderLongPressTriggered = true;
-  }
-
-  private updateReorder(item: StartPageItem, event?: GestureEvent): void {
-    if (!this.reorderTracking || !this.reorderLongPressTriggered || this.reorderItemId !== item.id) {
-      return;
-    }
-    this.reorderOffsetY = event?.offsetY ?? 0;
-  }
-
-  private finishReorder(item: StartPageItem): void {
-    if (!this.reorderTracking || this.reorderItemId !== item.id) {
-      return;
-    }
-    const offset: number = this.reorderOffsetY;
-    this.reorderTracking = false;
-    this.reorderLongPressTriggered = false;
-    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-      this.reorderOffsetY = 0;
-    });
-    const step: number = Math.round(offset / 64);
-    if (step !== 0) {
-      this.moveItem(item, step);
-    }
-    setTimeout(() => {
-      if (!this.reorderTracking) {
-        this.reorderItemId = '';
-      }
-    }, 180);
-  }
-
-  private cancelReorder(item: StartPageItem): void {
-    if (this.reorderItemId !== item.id) {
-      return;
-    }
-    this.reorderTracking = false;
-    this.reorderLongPressTriggered = false;
-    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-      this.reorderOffsetY = 0;
-    });
-    this.reorderItemId = '';
-  }
-
-  private removeItem(item: StartPageItem): void {
-    this.onItemsChange(this.items
-      .filter((candidate: StartPageItem) => candidate.id !== item.id)
-      .map((candidate: StartPageItem) => copyStartPageItem(candidate)));
-  }
-
-  private beginItemSwipe(item: StartPageItem): void {
-    this.swipeItemId = item.id;
-    this.swipeOffsetY = 0;
-    this.swipeFinished = false;
-  }
-
-  private updateItemSwipe(item: StartPageItem, event?: GestureEvent): void {
-    if (this.swipeFinished || this.swipeItemId !== item.id) {
-      return;
-    }
-    this.swipeOffsetY = Math.max(0, event?.offsetY ?? 0);
-  }
-
-  private finishItemSwipe(item: StartPageItem): void {
-    if (this.swipeFinished || this.swipeItemId !== item.id) {
-      return;
-    }
-    this.swipeFinished = true;
-    if (this.swipeOffsetY < 48) {
-      this.swipeOffsetY = 0;
-      this.swipeItemId = '';
-      return;
-    }
-    const target: StartPageItem = copyStartPageItem(item);
-    this.getUIContext().animateTo({ duration: 180, curve: Curve.Friction }, () => {
-      this.swipeOffsetY = 72;
-    });
-    setTimeout(() => {
-      this.removeItem(target);
-      this.swipeOffsetY = 0;
-      this.swipeItemId = '';
-    }, 180);
-  }
-
-  private cancelItemSwipe(item: StartPageItem): void {
-    if (this.swipeItemId !== item.id) {
-      return;
-    }
-    this.swipeFinished = true;
-    this.swipeOffsetY = 0;
-    this.swipeItemId = '';
   }
 
   private beginSheetSwipe(): void {
@@ -607,95 +488,6 @@ export struct StartPageCustomizeSheet {
       .onClick(() => this.selectBackgroundAction());
   }
 
-  @Builder
-  private reorderRow(item: StartPageItem) {
-    Row({ space: 10 }) {
-      SymbolGlyph(item.type === StartPageItemType.FAVORITE
-        ? $r('sys.symbol.star') : $r('sys.symbol.clock'))
-        .fontSize(19)
-        .fontColor(['#007AFF']);
-      Column({ space: 2 }) {
-        Text(item.title.length > 0 ? item.title : item.url)
-          .fontSize(14)
-          .fontColor('#1D1D1F')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%');
-        Text(item.type === StartPageItemType.FAVORITE ? '书签' : '经常访问的网站')
-          .fontSize(11)
-          .fontColor('#8E8E93');
-      }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start);
-      // Each user-managed start-page entry is enabled by default. Turning the
-      // switch off removes that entry from the start page; the adjacent native
-      // handle remains dedicated to long-press vertical ordering.
-      Toggle({ type: ToggleType.Switch, isOn: true })
-        .id(`start-page-item-toggle-${item.id}`)
-        .selectedColor('#007AFF')
-        .switchPointColor(Color.White)
-        .onChange((enabled: boolean) => {
-          if (!enabled) {
-            this.removeItem(item);
-          }
-        });
-      // Native three-line handle. The parallel long-press/pan recognizers
-      // require a deliberate 300ms hold before vertical movement can reorder
-      // the item; a short tap does nothing and never changes the switch.
-      SymbolGlyph($r('sys.symbol.line_3_horizontal'))
-        .id(`start-page-item-reorder-${item.id}`)
-        .fontSize(20)
-        .fontColor(['#8E8E93'])
-        .width(40)
-        .height(40)
-        .hitTestBehavior(HitTestMode.Block)
-        .gesture(
-          GestureGroup(
-            GestureMode.Parallel,
-            LongPressGesture({ duration: 300 })
-              .onAction(() => this.markReorderLongPress(item)),
-            PanGesture({ direction: PanDirection.Vertical })
-              .onActionStart(() => this.beginReorder(item))
-              .onActionUpdate((event: GestureEvent | undefined) => this.updateReorder(item, event))
-              .onActionEnd(() => this.finishReorder(item))
-              .onActionCancel(() => this.cancelReorder(item))
-          )
-        );
-    }
-      .id(`start-page-item-editor-${item.id}`)
-      .width('100%')
-      .height(58)
-      .padding({ left: 16, right: 10 })
-      // User-managed start-page entries are lightweight gray labels on the
-      // white sheet, matching the Safari card hierarchy.
-      .backgroundColor('#F2F2F7')
-      .border({ width: { bottom: 1 }, color: '#E5E5EA' })
-      .borderRadius(HARMONY_RADIUS_CARD)
-      .clip(true)
-      .opacity(this.swipeItemId === item.id ? Math.max(0.25, 1 - this.swipeOffsetY / 90) : 1)
-      .translate({
-        y: this.reorderItemId === item.id
-          ? this.reorderOffsetY
-          : (this.swipeItemId === item.id ? this.swipeOffsetY : 0),
-        x: 0,
-        z: 0
-      })
-      .scale({
-        x: this.reorderItemId === item.id ? 1.02 : 1,
-        y: this.reorderItemId === item.id ? 1.02 : 1,
-        z: 1
-      })
-      // A downward swipe removes an explicit favorite; there is no red
-      // close button competing with the row's reorder controls.
-      .gesture(
-        PanGesture({ direction: PanDirection.Down })
-          .onActionStart(() => this.beginItemSwipe(item))
-          .onActionUpdate((event: GestureEvent | undefined) => this.updateItemSwipe(item, event))
-          .onActionEnd(() => this.finishItemSwipe(item))
-          .onActionCancel(() => this.cancelItemSwipe(item))
-      );
-  }
-
   build() {
       Column() {
       // Measure the sheet against the full window and anchor it at the
@@ -748,16 +540,6 @@ export struct StartPageCustomizeSheet {
             .clip(true)
             .borderRadius(HARMONY_RADIUS_CARD);
 
-          Column() {
-            ForEach(this.editableItems(), (item: StartPageItem) => {
-              this.reorderRow(item);
-            }, (item: StartPageItem) => item.id);
-          }
-            .width('100%')
-            .backgroundColor('#F2F2F7')
-            .clip(true)
-            .borderRadius(HARMONY_RADIUS_CARD);
-
         }
           .width('100%')
           .height('100%')
@@ -774,19 +556,16 @@ export struct StartPageCustomizeSheet {
         }
       }
         .id('start-page-customize-sheet')
-        .width('100%')
+        .width(this.sheetWidth())
+        .alignSelf(ItemAlign.Center)
         // Keep the editor just high enough to cover the start-page edit affordance;
         // the rest of the options remain reachable through the native Scroll.
       .height('56%')
-        .backgroundColor(Color.White)
+        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
-        .shadow({ radius: 18, color: '#55000000', offsetX: 0, offsetY: -4 })
         .clip(true)
-        .systemMaterial(new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.THIN,
-          interactive: true
-        }))
-        .translate({ x: 0, y: this.sheetOffsetY, z: 0 })
+        .systemMaterial(safariImmersiveMaterialIfSupported())
+        .translate({ x: this.sheetHorizontalOffset(), y: this.sheetOffsetY, z: 0 })
         .parallelGesture(
           PanGesture({ direction: PanDirection.Down })
             .onActionStart(() => this.beginSheetSwipe())

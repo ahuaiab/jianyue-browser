@@ -19,7 +19,13 @@ import {
   visibleHistoryRecords
 } from '../model/LibraryModels';
 import { BookmarkRecord, HistoryRecord } from '../model/BrowserTypes';
-import { curves, uiMaterial } from '@kit.ArkUI';
+import { PageIconRecord } from '../model/PageIconModels';
+import fileUri from '@ohos.file.fileuri';
+import { curves } from '@kit.ArkUI';
+import {
+  safariImmersiveMaterialIfSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../model/BrowserMaterial';
 import {
   TAB_SEARCH_BAR_BACKGROUND_COLOR,
   TAB_SEARCH_BAR_CONTENT_INSET,
@@ -27,6 +33,9 @@ import {
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
 import {
+  BrowserChromeAnchor,
+  browserChromeSurfaceFrame,
+  browserChromeSurfaceHorizontalOffset,
   HARMONY_RADIUS_CONTROL,
   HARMONY_RADIUS_FLOATING,
   HARMONY_RADIUS_SHEET,
@@ -43,10 +52,16 @@ export struct LibrarySheet {
   /** Explicit invalidation token for async history changes in the parent shell. */
   @Param historyRevision: number = 0;
   @Param bookmarks: BookmarkRecord[] = [];
+  @Param pageIcons: PageIconRecord[] = [];
+  @Param pageIconRevision: number = 0;
   /** System top avoid area in vp; the sheet keeps a visual breathing gap below it. */
   @Param topInset: number = 0;
   /** Bottom navigation-indicator avoid area in vp. */
   @Param bottomInset: number = 0;
+  @Param viewportWidth: number = 400;
+  @Param leftInset: number = 0;
+  @Param rightInset: number = 0;
+  @Param chromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
   @Param onOpen: (url: string) => void = (_url: string) => undefined;
   @Param onRemoveBookmark: (url: string) => void = (_url: string) => undefined;
   @Param onRemoveHistory: (entry: LibraryEntry) => void = (_entry: LibraryEntry) => undefined;
@@ -100,7 +115,11 @@ export struct LibrarySheet {
       this.history,
       this.hiddenHistoryEntryIds
     );
-    const groups: HistoryTimelineGroup[] = historyTimelineGroups(visibleRecords, Date.now())
+    const groups: HistoryTimelineGroup[] = historyTimelineGroups(
+      visibleRecords,
+      Date.now(),
+      this.pageIcons
+    )
       .map((group: HistoryTimelineGroup): HistoryTimelineGroup => ({
         section: group.section,
         title: group.title,
@@ -391,7 +410,8 @@ export struct LibrarySheet {
   }
 
   private entries(): LibraryEntry[] {
-    return libraryEntries(this.section, this.history, this.bookmarks);
+    void this.pageIconRevision;
+    return libraryEntries(this.section, this.history, this.bookmarks, this.pageIcons);
   }
 
   private filteredEntries(): LibraryEntry[] {
@@ -525,14 +545,26 @@ export struct LibrarySheet {
 
   @Builder
   private entryIcon(entry: LibraryEntry) {
-    if (entry.section === LibrarySection.BOOKMARKS) {
-      SymbolGlyph($r('sys.symbol.bookmark_fill'))
-        .fontSize(18)
-        .fontColor(['#007AFF']);
+    if (this.iconSourceFor(entry).length > 0) {
+      Image(this.iconSourceFor(entry))
+        .width(28)
+        .height(28)
+        .objectFit(ImageFit.Contain);
     } else {
-      SymbolGlyph($r('sys.symbol.clock'))
-        .fontSize(18)
-        .fontColor(['#8A8A90']);
+      SymbolGlyph($r('sys.symbol.display'))
+        .fontSize(22)
+        .fontColor(['#007AFF']);
+    }
+  }
+
+  private iconSourceFor(entry: LibraryEntry): string {
+    if (entry.iconPath === undefined || entry.iconPath.length === 0) {
+      return '';
+    }
+    try {
+      return fileUri.getUriFromPath(entry.iconPath);
+    } catch (_error) {
+      return '';
     }
   }
 
@@ -557,8 +589,8 @@ export struct LibrarySheet {
         Stack() {
           this.entryIcon(entry);
         }
-          .width(26)
-          .height(26)
+          .width(32)
+          .height(32)
           .alignContent(Alignment.Center);
         Column({ space: 2 }) {
           Text(entry.title)
@@ -580,11 +612,11 @@ export struct LibrarySheet {
           .alignItems(HorizontalAlign.Start);
       }
         .width('100%')
-        .height(entry.section === LibrarySection.BOOKMARKS ? 36 : 56);
+        .height(entry.section === LibrarySection.BOOKMARKS ? 52 : 60);
       Row()
         .width('100%')
         .height(1)
-        .margin({ left: 36 })
+        .margin({ left: 44 })
         .backgroundColor('#E5E5EA');
     }
       .id(`library-entry-${entry.id}`)
@@ -602,10 +634,7 @@ export struct LibrarySheet {
       .onClick(() => this.handleEntryClick(entry))
       .bindContextMenu(this.menuEntryId === entry.id, this.historyMenu(entry), {
         placement: Placement.TopRight,
-        systemMaterial: new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.THIN,
-          interactive: true
-        }),
+        systemMaterial: safariImmersiveMaterialIfSupported(),
         onDisappear: () => this.dismissEntryMenu(entry.id)
       })
       .gesture(
@@ -780,13 +809,9 @@ export struct LibrarySheet {
       .width(52)
       .height(52)
       .padding(0)
-      .backgroundColor('#D9F2F2F7')
+      .backgroundColor(safariImmersiveSurfaceBackgroundColor())
       .borderRadius(HARMONY_RADIUS_FLOATING)
-      .shadow({ radius: 16, color: '#28000000', offsetX: 0, offsetY: 4 })
-      .systemMaterial(new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-        interactive: false
-      }))
+      .systemMaterial(safariImmersiveMaterialIfSupported())
       .stateEffect(false)
       .onClick(() => this.handleEditClick())
       .bindContextMenu(this.editMenuShown, this.editMenu, {
@@ -805,6 +830,36 @@ export struct LibrarySheet {
     // Keep the edit action above the gesture indicator even when the window
     // reports its avoid area one frame late (or reports zero in Previewer).
     return Math.max(16, this.bottomInset);
+  }
+
+  private floatingEditAlignment(): Alignment {
+    return this.chromeAnchor === BrowserChromeAnchor.START
+      ? Alignment.BottomStart
+      : Alignment.BottomEnd;
+  }
+
+  private floatingEditHorizontalInset(): number {
+    return this.chromeAnchor === BrowserChromeAnchor.START
+      ? Math.max(16, this.leftInset + 16)
+      : Math.max(16, this.rightInset + 16);
+  }
+
+  private sheetWidth(): number {
+    return browserChromeSurfaceFrame(
+      this.viewportWidth,
+      this.leftInset,
+      this.rightInset,
+      this.chromeAnchor
+    ).width;
+  }
+
+  private sheetHorizontalOffset(): number {
+    return browserChromeSurfaceHorizontalOffset(
+      this.viewportWidth,
+      this.leftInset,
+      this.rightInset,
+      this.chromeAnchor
+    );
   }
 
   private topContentInset(): number {
@@ -879,25 +934,26 @@ export struct LibrarySheet {
         this.footerSpacer();
       }
         .id('library-sheet')
-        .width('100%')
+        .width(this.sheetWidth())
+        .alignSelf(ItemAlign.Center)
         // Leave a transparent breathing area above the sheet. The child
         // remains bottom-anchored and paints only its own rounded surface.
         .height(`${LIBRARY_SHEET_HEIGHT_PERCENT}%`)
         .padding({ left: 0, right: 0, top: 0, bottom: 0 })
-        .backgroundColor(Color.White)
+        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
-        .shadow({ radius: 12, color: '#55000000', offsetX: 0, offsetY: -3 })
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .translate({ x: 0, y: this.sheetSwipeOffset })
+        .translate({ x: this.sheetHorizontalOffset(), y: this.sheetSwipeOffset })
         .opacity(1 - 0.22 * libraryDismissProgress(this.sheetSwipeOffset))
-        .parallelGesture(
-          PanGesture({ direction: PanDirection.Vertical, distance: 8 })
-            .onActionStart(() => this.beginSheetSwipe())
-            .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
-            .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
-            .onActionCancel(() => this.cancelSheetSwipe())
-        );
+          .parallelGesture(
+            PanGesture({ direction: PanDirection.Vertical, distance: 8 })
+              .onActionStart(() => this.beginSheetSwipe())
+              .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
+              .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
+              .onActionCancel(() => this.cancelSheetSwipe())
+        )
+        .systemMaterial(safariImmersiveMaterialIfSupported());
       }
         .width('100%')
         .height('100%')
@@ -906,13 +962,21 @@ export struct LibrarySheet {
       // Keep the edit/check control outside the sheet hierarchy. This gives
       // the library page the same independent floating action treatment as
       // the tab overview's plus and done controls.
-      Stack({ alignContent: Alignment.BottomEnd }) {
+      Stack({ alignContent: this.floatingEditAlignment() }) {
         this.floatingEditButton();
       }
         .id('library-floating-edit-host')
-        .width('100%')
+        .width(this.sheetWidth())
         .height('100%')
-        .padding({ right: 16, bottom: this.safeBottomInset() + 12 })
+        .alignSelf(ItemAlign.Center)
+        .translate({ x: this.sheetHorizontalOffset(), y: 0, z: 0 })
+        .padding({
+          left: this.chromeAnchor === BrowserChromeAnchor.START
+            ? this.floatingEditHorizontalInset() : 0,
+          right: this.chromeAnchor === BrowserChromeAnchor.START
+            ? 0 : this.floatingEditHorizontalInset(),
+          bottom: this.safeBottomInset() + 12
+        })
         // The host only positions the floating pencil. It must not become a
         // full-screen hit target and steal taps from the library tabs/list.
         .hitTestBehavior(HitTestMode.Transparent);

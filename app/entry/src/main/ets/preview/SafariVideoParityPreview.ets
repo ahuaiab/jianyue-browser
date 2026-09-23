@@ -1,5 +1,4 @@
 import { BottomBrowserBar } from '../browser/components/BottomBrowserBar';
-import { uiMaterial } from '@kit.ArkUI';
 import { AddressSearchBar } from '../browser/components/AddressSearchBar';
 import { LibrarySheet } from '../browser/components/LibrarySheet';
 import { PageDisplayMenu } from '../browser/components/PageDisplayMenu';
@@ -10,13 +9,16 @@ import { PageAction } from '../browser/model/PageActions';
 import { BrowserSettings, copyBrowserSettings, DEFAULT_BROWSER_SETTINGS } from '../browser/model/BrowserSettings';
 import { PageFontSize } from '../browser/model/PageDisplayState';
 import {
+  safariImmersiveMaterialIfSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../browser/model/BrowserMaterial';
+import {
   BookmarkRecord,
   BrowserTabRecord,
   GestureSample,
   HistoryRecord,
   TabResidency
 } from '../browser/model/BrowserTypes';
-import { StartPageItem, StartPageItemType } from '../browser/model/StartPageModels';
 import { HARMONY_RADIUS_SHEET } from '../browser/model/BrowserVisualMetrics';
 
 const PREVIEW_SETTINGS: BrowserSettings = copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
@@ -69,33 +71,6 @@ const PREVIEW_BOOKMARKS: BookmarkRecord[] = [
   { url: 'https://developer.huawei.com/consumer/cn/', title: 'HarmonyOS 开发者', createdAt: 3 },
   { url: 'https://www.apple.com/safari/', title: 'Safari', createdAt: 2 }
 ];
-const PREVIEW_START_PAGE_ITEMS: StartPageItem[] = [
-  {
-    id: 'preview-favorite-1',
-    type: StartPageItemType.FAVORITE,
-    title: 'HarmonyOS',
-    url: 'https://developer.huawei.com',
-    order: 0,
-    updatedAt: 1
-  },
-  {
-    id: 'preview-favorite-2',
-    type: StartPageItemType.FAVORITE,
-    title: 'Safari',
-    url: 'https://www.apple.com/safari/',
-    order: 1,
-    updatedAt: 2
-  },
-  {
-    id: 'preview-favorite-3',
-    type: StartPageItemType.FAVORITE,
-    title: '搜索',
-    url: 'https://www.bing.com',
-    order: 2,
-    updatedAt: 3
-  }
-];
-
 /** Primary visual check: the page surface flows into one native bottom chrome. */
 @Preview
 @Component
@@ -129,13 +104,10 @@ struct SafariImmersiveChromePreview {
         .width('100%')
         .height(128)
         .padding({ bottom: 28 })
-        .backgroundColor('#D9F2F2F7')
+        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
         .clip(true)
-        .systemMaterial(new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-          interactive: false
-        }))
+        .systemMaterial(safariImmersiveMaterialIfSupported())
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
     }
       .width('100%')
@@ -239,13 +211,10 @@ struct SafariStartPageChromePreview {
       .width('100%')
       .height(128)
       .padding({ bottom: 28 })
-      .backgroundColor('#D9F2F2F7')
+      .backgroundColor(safariImmersiveSurfaceBackgroundColor())
       .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
       .clip(true)
-      .systemMaterial(new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-        interactive: false
-      }))
+      .systemMaterial(safariImmersiveMaterialIfSupported())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     }
     .width('100%')
@@ -279,13 +248,10 @@ struct SafariToolbarPreview {
     .width('100%')
     .height(76)
     .padding({ bottom: 28 })
-    .backgroundColor('#D9F2F2F7')
+    .backgroundColor(safariImmersiveSurfaceBackgroundColor())
     .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
     .clip(true)
-    .systemMaterial(new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-      interactive: false
-    }))
+    .systemMaterial(safariImmersiveMaterialIfSupported())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 }
@@ -376,11 +342,9 @@ struct SafariStartPageCustomizePreview {
   build() {
     StartPageCustomizeSheet({
       settings: PREVIEW_SETTINGS,
-      items: PREVIEW_START_PAGE_ITEMS,
       topInset: 24,
       bottomInset: 28,
       onSettingsChange: (_settings: BrowserSettings) => undefined,
-      onItemsChange: (_items: StartPageItem[]) => undefined,
       onClose: () => undefined
     })
   }

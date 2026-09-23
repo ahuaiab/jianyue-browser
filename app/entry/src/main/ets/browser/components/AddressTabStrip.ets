@@ -54,6 +54,7 @@ export struct AddressTabStrip {
   @Param interactionLocked: boolean = false;
   @Param address: string = '';
   @Param pageTitle: string = '';
+  @Param preferredLabel: string = '';
   @Param searchQuery: string = '';
   @Param addressDraft: string = '';
   @Param isPrivate: boolean = false;
@@ -276,6 +277,7 @@ export struct AddressTabStrip {
     AddressSearchBar({
       address: index === this.activeIndex ? this.address : lastValidUrlForTab(tab),
       pageTitle: index === this.activeIndex ? this.pageTitle : tab.title,
+      preferredLabel: index === this.activeIndex ? this.preferredLabel : '',
       searchQuery: index === this.activeIndex
         ? this.searchQuery
         : tab.addressSource === 'search'

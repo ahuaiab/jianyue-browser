@@ -22,6 +22,9 @@ import downloadManagerUiTest from './ets/test/DownloadManagerUi.test';
 import defaultBrowserApiTest from './ets/test/DefaultBrowserApi.test';
 import tabGestureMotionTest from './ets/test/TabGestureMotion.test';
 import adaptiveBrowserLayoutTest from './ets/test/AdaptiveBrowserLayout.test';
+import startPageBookmarksTest from './ets/test/StartPageBookmarks.test';
+import pageIconsTest from './ets/test/PageIcons.test';
+import externalAppNavigationTest from './ets/test/ExternalAppNavigation.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -48,4 +51,7 @@ export default function testsuite() {
   defaultBrowserApiTest();
   tabGestureMotionTest();
   adaptiveBrowserLayoutTest();
+  startPageBookmarksTest();
+  pageIconsTest();
+  externalAppNavigationTest();
 }

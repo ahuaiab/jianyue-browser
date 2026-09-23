@@ -8,6 +8,7 @@ import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
 import { BrowserErrorState } from '../model/BrowserTypes';
 import { StartPageItem } from '../model/StartPageModels';
+import { PageIconRecord } from '../model/PageIconModels';
 import { TabPreviewKind as MotionPreviewKind } from '../model/TabGestureMotion';
 import {
   shouldPreferStableStartPageFrame,
@@ -80,8 +81,10 @@ export struct BrowserTransitionScene {
   @Param showOverviewPageBorder: boolean = false;
   @Param interactionLocked: boolean = false;
   @Param currentItems: StartPageItem[] = [];
+  @Param pageIcons: PageIconRecord[] = [];
+  @Param pageIconRevision: number = 0;
   @Param errorState: BrowserErrorState | undefined = undefined;
-  @Param onOpen: (url: string) => void = (_url: string) => undefined;
+  @Param onOpen: (url: string, title?: string) => void = (_url: string, _title?: string) => undefined;
   @Param onAddFavorite: () => void = () => undefined;
   @Param onCustomize: () => void = () => undefined;
   @Param onNavigate: (value: string) => void = (_value: string) => undefined;
@@ -246,6 +249,8 @@ export struct BrowserTransitionScene {
           // its gallery image can decode before it becomes interactive again.
           StartPage({
             items: this.currentItems,
+            pageIcons: this.pageIcons,
+            pageIconRevision: this.pageIconRevision,
             settings: this.settings,
             pageTranslateX: 0,
             onOpen: this.onOpen,
@@ -323,6 +328,8 @@ export struct BrowserTransitionScene {
       } else if (this.previewHost === undefined && this.previewIsStartPage) {
         StartPage({
           items: this.currentItems,
+          pageIcons: this.pageIcons,
+          pageIconRevision: this.pageIconRevision,
           settings: this.settings,
           pageTranslateX: 0,
           backgroundViewportHeight: this.backgroundViewportHeight()

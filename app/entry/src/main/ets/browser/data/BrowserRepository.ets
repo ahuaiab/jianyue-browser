@@ -14,6 +14,12 @@ import {
   normalizeBrowserSettings
 } from '../model/BrowserSettings';
 import { sortStartPageItems, StartPageItem, validStartPageItem } from '../model/StartPageModels';
+import {
+  copyPageIconRecord,
+  PageIconRecord,
+  upsertPageIconRecord,
+  validPageIconRecord
+} from '../model/PageIconModels';
 import { ClosedTabRecord } from './ClosedTabStack';
 import { KeyValueStore } from './KeyValueStore';
 
@@ -24,14 +30,17 @@ const HISTORY_KEY: string = 'history.v1';
 const BOOKMARKS_KEY: string = 'bookmarks.v1';
 const SETTINGS_KEY: string = 'browser.settings.v1';
 const START_PAGE_KEY: string = 'start.page.items.v1';
+const PAGE_ICONS_KEY: string = 'page.icons.v1';
 const CLOSED_TABS_KEY: string = 'closed.tabs.v1';
 const MAX_HISTORY: number = 2000;
+const MAX_PAGE_ICONS: number = 256;
 const MAX_CLOSED_TABS: number = 20;
 
 export class BrowserRepository {
   private readonly store: KeyValueStore;
   private sessionOperation: Promise<void> = Promise.resolve();
   private historyOperation: Promise<void> = Promise.resolve();
+  private pageIconOperation: Promise<void> = Promise.resolve();
 
   constructor(store: KeyValueStore) {
     this.store = store;
@@ -97,6 +106,13 @@ export class BrowserRepository {
   private enqueueHistoryOperation(operation: () => Promise<void>): Promise<void> {
     const next: Promise<void> = this.historyOperation.then(operation, operation);
     this.historyOperation = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  /** Serialize favicon cache read-modify-write operations from concurrent tabs. */
+  private enqueuePageIconOperation(operation: () => Promise<void>): Promise<void> {
+    const next: Promise<void> = this.pageIconOperation.then(operation, operation);
+    this.pageIconOperation = next.then(() => undefined, () => undefined);
     return next;
   }
 
@@ -268,6 +284,32 @@ export class BrowserRepository {
   async saveStartPageItems(items: StartPageItem[]): Promise<void> {
     const valid: StartPageItem[] = items.filter((item: StartPageItem) => validStartPageItem(item));
     await this.writeJson(START_PAGE_KEY, sortStartPageItems(valid));
+  }
+
+  async listPageIcons(): Promise<PageIconRecord[]> {
+    const raw: string = await this.store.getString(PAGE_ICONS_KEY, '[]');
+    try {
+      const parsed: PageIconRecord[] = JSON.parse(raw) as PageIconRecord[];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .filter((record: PageIconRecord) => validPageIconRecord(record))
+        .map((record: PageIconRecord) => copyPageIconRecord(record))
+        .slice(-MAX_PAGE_ICONS);
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async savePageIcon(record: PageIconRecord): Promise<void> {
+    if (!validPageIconRecord(record)) {
+      return;
+    }
+    await this.enqueuePageIconOperation(async (): Promise<void> => {
+      const records: PageIconRecord[] = await this.listPageIcons();
+      await this.writeJson(PAGE_ICONS_KEY, upsertPageIconRecord(records, record, MAX_PAGE_ICONS));
+    });
   }
 
   async loadClosedTabs(): Promise<ClosedTabRecord[]> {

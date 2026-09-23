@@ -36,6 +36,13 @@ export default function browserTypesTest() {
     it('keeps explicit HTTP(S) addresses', 0, () => {
       expect(normalizeAddressInput('https://example.com')).assertEqual('https://example.com');
       expect(normalizeAddressInput(' http://example.com ')).assertEqual('http://example.com');
+      expect(normalizeAddressInput('https://192.168.2.1')).assertEqual('https://192.168.2.1');
+    });
+
+    it('defaults a bare IPv4 address to HTTP', 0, () => {
+      expect(normalizeAddressInput('192.168.2.1')).assertEqual('http://192.168.2.1');
+      expect(normalizeAddressInput('192.168.2.1:8080/admin'))
+        .assertEqual('http://192.168.2.1:8080/admin');
     });
 
     it('adds HTTPS to a hostname', 0, () => {

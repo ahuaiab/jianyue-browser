@@ -69,6 +69,19 @@ export default function browserInteractionTest() {
         .assertEqual('example.com');
     });
 
+    it('uses the saved bookmark label in the collapsed address bar', 0, () => {
+      expect(addressBarLabelFor(
+        'https://example.com/path?query=1',
+        'Example Domain',
+        '我的书签'
+      )).assertEqual('我的书签');
+      expect(addressBarLabelFor(
+        'https://example.com/path?query=1',
+        'Example Domain',
+        '  '
+      )).assertEqual('example.com');
+    });
+
     it('left aligns the active editor and centers the collapsed address label', 0, () => {
       expect(addressTextAlignmentFor(true)).assertEqual('start');
       expect(addressTextAlignmentFor(false)).assertEqual('center');

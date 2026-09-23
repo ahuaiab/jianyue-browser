@@ -1,6 +1,5 @@
 /** Fixed lower action row for the shared Safari bottom chrome. */
 import {
-  HARMONY_RADIUS_TINY,
   SAFARI_ACTION_TOOLBAR_HEIGHT_VP,
   SAFARI_BOTTOM_CHROME_RAIL_INSET_VP
 } from '../model/BrowserVisualMetrics';
@@ -71,16 +70,24 @@ export struct BrowserActionToolbar {
   @Builder
   private tabOverviewIcon() {
     Stack() {
-      SymbolGlyph($r('sys.symbol.square'))
-        .fontSize(24)
-        .fontColor(['#007AFF'])
+      Polyline()
+        .width(24)
+        .height(24)
+        .points([[3, 3], [21, 3], [21, 8]])
+        .fillOpacity(0)
+        .stroke('#007AFF')
+        .strokeWidth(2)
+        .strokeLineJoin(LineJoinStyle.Round)
         .offset({ x: -3, y: -3 });
-      Column()
-        .width(18)
-        .height(18)
-        .backgroundColor('#F2F2F7')
-        .borderRadius(HARMONY_RADIUS_TINY)
-        .offset({ x: 3, y: 3 });
+      Polyline()
+        .width(24)
+        .height(24)
+        .points([[3, 3], [3, 21], [8, 21]])
+        .fillOpacity(0)
+        .stroke('#007AFF')
+        .strokeWidth(2)
+        .strokeLineJoin(LineJoinStyle.Round)
+        .offset({ x: -3, y: -3 });
       SymbolGlyph($r('sys.symbol.square'))
         .fontSize(24)
         .fontColor(['#007AFF'])

@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { AnimatorResult, curves, UIContext } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { common, OpenLinkOptions } from '@kit.AbilityKit';
+import { motion } from '@kit.MultimodalAwarenessKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { image } from '@kit.ImageKit';
@@ -36,10 +37,12 @@ import {
   WebPageLifecycleObserver,
   WebSslError
 } from '../web/WebTabNode';
+import { ExternalAppLinkLauncher } from '../web/ExternalAppNavigation';
 import { WebTabPool } from '../web/WebTabPool';
 import { HarmonyWebPermissionHandler } from '../web/ArkWebPermissionHandler';
 import { MemorySnapshotStorage, TabSnapshotCache } from '../snapshot/TabSnapshotCache';
 import { BrowserRepository } from '../data/BrowserRepository';
+import { PageIconFileStore } from '../data/PageIconFileStore';
 import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
 import { KeyValueStore, MemoryKeyValueStore, PreferencesKeyValueStore } from '../data/KeyValueStore';
 import { BrowserLifecyclePort, BrowserLifecycleRegistry } from '../lifecycle/BrowserLifecyclePort';
@@ -72,11 +75,14 @@ import {
   PageFontSize
 } from '../model/PageDisplayState';
 import {
-  copyStartPageItem,
+  mergeBookmarkedStartPageItems,
   StartPageItem,
-  StartPageItemType,
   startPageThumbnailMatchesBackground
 } from '../model/StartPageModels';
+import {
+  PageIconRecord,
+  upsertPageIconRecord
+} from '../model/PageIconModels';
 import {
   shouldDisableBottomChromeHitTesting,
   shouldDisableTabOverviewLivePageHitTesting,
@@ -114,17 +120,22 @@ import {
   BROWSER_OVERVIEW_ANIMATION_DURATION_MS,
   BROWSER_OVERVIEW_TRANSITION_DURATION_MS,
   BrowserChromeAnchor,
+  BrowserChromeHandedness,
   BrowserChromeLayoutFrame,
+  BrowserChromeOperatingHand,
+  browserChromeAnchorForHandedness,
+  browserChromeAnchorForOperatingHand,
   browserChromeLayoutFrame,
   HARMONY_RADIUS_CARD,
   SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS,
   SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS,
   SAFARI_ADDRESS_ITEM_GAP_VP,
   SAFARI_ADDRESS_PREVIEW_FADE_DURATION_MS,
-  SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
   SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP,
   SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
   safariAddressItemWidth,
+  safariBottomChromeLayoutHeight,
+  safariBottomChromeVisualHeight,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP,
   START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE
@@ -203,6 +214,11 @@ import { DownloadNotificationGateway } from '../web/DownloadNotificationGateway'
 import { DownloadService, WebCookiePort } from '../web/DownloadService';
 import { RequestAgentGateway } from '../web/RequestAgentGateway';
 import { takePendingExternalUrl } from '../model/BrowserLaunchState';
+import {
+  bottomChromeHiddenForScroll,
+  BrowserChromeScrollDirection,
+  browserChromeScrollDirection
+} from '../model/BrowserChromeScroll';
 
 const ENABLE_GESTURE_LAB: boolean = false;
 const BROWSER_WEB_DOMAIN: number = 0x0000;
@@ -490,6 +506,12 @@ class ArkWebTabRuntimePort implements TabRuntimePort {
 class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownloadObserver {
   private readonly pageBeginCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void;
   private readonly callback: (tabId: TabId, controller: webview.WebviewController) => void;
+  private readonly scrollCallback: (
+    tabId: TabId, controller: webview.WebviewController, yOffset: number
+  ) => void;
+  private readonly faviconCallback: (
+    tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap
+  ) => void;
   private readonly titleCallback: (tabId: TabId, controller: webview.WebviewController, title: string) => void;
   private readonly errorCallback: (tabId: TabId, controller: webview.WebviewController, diagnostic: WebLoadError) => void;
   private readonly sslErrorCallback: (tabId: TabId, controller: webview.WebviewController, diagnostic: WebSslError) => void;
@@ -524,10 +546,20 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
     downloadFailedCallback: (tabId: TabId) => void =
       (_tabId: TabId) => undefined,
     pageBeginCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void =
-      (_tabId: TabId, _controller: webview.WebviewController, _url: string) => undefined
+      (_tabId: TabId, _controller: webview.WebviewController, _url: string) => undefined,
+    scrollCallback: (
+      tabId: TabId, controller: webview.WebviewController, yOffset: number
+    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _yOffset: number) => undefined,
+    faviconCallback: (
+      tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap
+    ) => void = (
+      _tabId: TabId, _controller: webview.WebviewController, _favicon: image.PixelMap
+    ) => undefined
   ) {
     this.pageBeginCallback = pageBeginCallback;
     this.callback = callback;
+    this.scrollCallback = scrollCallback;
+    this.faviconCallback = faviconCallback;
     this.titleCallback = titleCallback;
     this.errorCallback = errorCallback;
     this.sslErrorCallback = sslErrorCallback;
@@ -546,6 +578,18 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
 
   onPageEnd(tabId: TabId, controller: webview.WebviewController): void {
     this.callback(tabId, controller);
+  }
+
+  onScroll(tabId: TabId, controller: webview.WebviewController, yOffset: number): void {
+    this.scrollCallback(tabId, controller, yOffset);
+  }
+
+  onFaviconReceived(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    favicon: image.PixelMap
+  ): void {
+    this.faviconCallback(tabId, controller, favicon);
   }
 
   onTitleReceive(tabId: TabId, controller: webview.WebviewController, title: string): void {
@@ -708,6 +752,12 @@ export struct BrowserShell {
   @Local touchHitTestMode: string = 'Block';
   @Local isDragging: boolean = false;
   @Local gestureActive: boolean = false;
+  // Web.onScroll reports the absolute page offset. Keep one baseline per tab
+  // so small rendering noise does not make the floating chrome chatter.
+  @Local bottomChromeScrollHidden: boolean = false;
+  private readonly lastWebScrollOffsetByTab: Map<TabId, number> = new Map();
+  private bottomChromeScrollAnimationToken: number = 0;
+  private bottomChromeScrollTargetHidden: boolean = false;
   // Bottom chrome is one Root-stack TabBar.  The editor expands inside that
   // same surface; these two values are the only source of truth for its
   // expansion animation and input interaction mode.
@@ -767,6 +817,8 @@ export struct BrowserShell {
   @Local historyItems: HistoryRecord[] = [];
   @Local historyRevision: number = 0;
   @Local bookmarkItems: BookmarkRecord[] = [];
+  @Local pageIconItems: PageIconRecord[] = [];
+  @Local pageIconRevision: number = 0;
   private historySuppressedTabId: TabId = '';
   private historySuppressedUrl: string = '';
   @Local pageDisplayState: PageDisplayState = {
@@ -803,6 +855,10 @@ export struct BrowserShell {
   // only fixed browser chrome; the page background remains edge-to-edge.
   @Local leftAvoidInset: number = 0;
   @Local rightAvoidInset: number = 0;
+  // Smart reach only changes the horizontal anchor. The chrome keeps its
+  // fixed width and remains centered while the system has no single-hand
+  // result or the device does not expose the motion capability.
+  @Local browserChromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
 
   private readonly tabStore: TabStore = new TabStore();
   // The fixed TabBar owns the only app-level horizontal gesture stream and
@@ -854,6 +910,10 @@ export struct BrowserShell {
   // address bar must not fall back to that redirect URL or a generic page
   // title such as "网页".
   private readonly searchLabelsByTab: Map<TabId, string> = new Map();
+  // A start-page bookmark supplies a user-facing label for the collapsed
+  // address capsule. The editor still uses the committed URL; this map only
+  // affects the compact, non-editing presentation.
+  private readonly preferredAddressLabelsByTab: Map<TabId, string> = new Map();
   // The editor presentation is source-driven: a search result restores the
   // submitted query, while a direct/external URL restores the real URL.
   private readonly addressPresentationByTab: Map<TabId, AddressBarPresentationMode> = new Map();
@@ -868,6 +928,7 @@ export struct BrowserShell {
   private readonly canNavigateForwardByTab: Map<TabId, boolean> = new Map();
   private readonly errorStatesByTab: Map<TabId, BrowserErrorState | undefined> = new Map();
   private repository: BrowserRepository | undefined = undefined;
+  private pageIconFileStore: PageIconFileStore | undefined = undefined;
   private downloadService: DownloadService | undefined = undefined;
   private downloadLifecycle: BrowserDownloadLifecycle | undefined = undefined;
   private lifecyclePort: BrowserLifecyclePort | undefined = undefined;
@@ -879,6 +940,10 @@ export struct BrowserShell {
   private mainWindow: window.Window | undefined = undefined;
   private avoidAreaListener: ((data: window.AvoidAreaOptions) => void) | undefined = undefined;
   private windowSizeChangeListener: ((size: window.Size) => void) | undefined = undefined;
+  private holdingHandListener:
+    ((status: motion.HoldingHandStatus) => void) | undefined = undefined;
+  private operatingHandListener:
+    ((status: motion.OperatingHandStatus) => void) | undefined = undefined;
   private overviewTabRequestToken: number = 0;
   // Cancels an overview-open wait when the user dismisses the overview or
   // starts another tab operation before the active page frame is ready.
@@ -915,12 +980,23 @@ export struct BrowserShell {
     this.addressInputFocusEnabled = true;
     const uiContext: UIContext = this.getUIContext();
     this.observeWindowAvoidArea(uiContext);
+    this.observeHoldingHand();
     const hostContext = uiContext.getHostContext();
+    this.pageIconFileStore = hostContext === undefined
+      ? undefined
+      : new PageIconFileStore(hostContext.filesDir);
     const permissionHandler = hostContext === undefined
       ? undefined
       : new HarmonyWebPermissionHandler(hostContext);
+    const externalAppLinkLauncher: ExternalAppLinkLauncher | undefined = hostContext === undefined
+      ? undefined
+      : (uri: string): Promise<void> => {
+        const options: OpenLinkOptions = { appLinkingOnly: false };
+        return (hostContext as common.UIAbilityContext).openLink(uri, options);
+      };
     const pageLifecycleObserver: WebPageLifecycleObserver = new BrowserPageLifecycleObserver(
       (tabId: TabId, controller: webview.WebviewController) => {
+        this.resetBottomChromeScroll(tabId);
         this.applyUserAgentMode(tabId, controller, false);
         const currentUrl: string = this.urlForTab(tabId);
         let renderedUrl: string = '';
@@ -1064,6 +1140,7 @@ export struct BrowserShell {
         void tabId;
       },
       (tabId: TabId, controller: webview.WebviewController, reportedUrl: string) => {
+        this.resetBottomChromeScroll(tabId);
         const currentUrl: string = this.urlForTab(tabId);
         const validation = validateBrowserUrl(reportedUrl);
         const nextUrl: string = committedNavigationUrl(reportedUrl, currentUrl);
@@ -1110,6 +1187,11 @@ export struct BrowserShell {
           }
           void this.saveSession();
         }
+      },
+      (tabId: TabId, controller: webview.WebviewController, yOffset: number) =>
+        this.handleWebPageScroll(tabId, controller, yOffset),
+      (tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap) => {
+        void this.handleFaviconReceived(tabId, controller, favicon);
       }
     );
     const keyValueStore: KeyValueStore = hostContext === undefined
@@ -1164,7 +1246,8 @@ export struct BrowserShell {
           '',
           'web-src-runtime-created'
         ),
-      permissionHandler
+      permissionHandler,
+      externalAppLinkLauncher
     ));
     this.runtimePort = new ArkWebTabRuntimePort(this.tabStore, this.webTabPool);
     this.dispatcher = new DefaultBrowserCommandDispatcher(
@@ -1192,6 +1275,7 @@ export struct BrowserShell {
     this.addressHandoffAnimationToken += 1;
     this.addressHandoffAnimator?.finish();
     this.addressHandoffAnimator = undefined;
+    this.stopHoldingHandObservation();
     if (this.mainWindow !== undefined && this.avoidAreaListener !== undefined) {
       this.mainWindow.off('avoidAreaChange', this.avoidAreaListener);
     }
@@ -1241,6 +1325,200 @@ export struct BrowserShell {
       return Math.max(0, uiContext.px2vp(insetPx));
     } catch (_error) {
       return 0;
+    }
+  }
+
+  private browserChromeHandednessForStatus(
+    status: motion.HoldingHandStatus
+  ): BrowserChromeHandedness {
+    if (status === motion.HoldingHandStatus.LEFT_HAND_HELD) {
+      return BrowserChromeHandedness.LEFT;
+    }
+    if (status === motion.HoldingHandStatus.RIGHT_HAND_HELD) {
+      return BrowserChromeHandedness.RIGHT;
+    }
+    if (status === motion.HoldingHandStatus.BOTH_HANDS_HELD) {
+      return BrowserChromeHandedness.BOTH;
+    }
+    return BrowserChromeHandedness.UNKNOWN;
+  }
+
+  private updateBrowserChromeAnchor(
+    nextAnchor: BrowserChromeAnchor,
+    source: string,
+    status: number
+  ): void {
+    if (nextAnchor === this.browserChromeAnchor) {
+      return;
+    }
+    const previousAnchor: BrowserChromeAnchor = this.browserChromeAnchor;
+    try {
+      // Animate only the anchor state. A parent-level animation would also
+      // capture overview opacity/scale and reintroduce transition flicker.
+      this.getUIContext().animateTo({
+        curve: curves.springMotion()
+      }, () => {
+        this.browserChromeAnchor = nextAnchor;
+      });
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_anchor_changed source=%{public}s from=%{public}s to=%{public}s status=%{public}d',
+        source,
+        String(previousAnchor),
+        String(nextAnchor),
+        status
+      );
+    } catch (error) {
+      this.browserChromeAnchor = nextAnchor;
+      const errorCode: number = (error as BusinessError).code ?? -1;
+      hilog.warn(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_anchor_animation_failed code=%{public}d fallback=immediate',
+        errorCode
+      );
+    }
+  }
+
+  private updateBrowserChromeHandedness(status: motion.HoldingHandStatus): void {
+    this.updateBrowserChromeAnchor(
+      browserChromeAnchorForHandedness(this.browserChromeHandednessForStatus(status)),
+      'holding_hand',
+      status
+    );
+  }
+
+  private browserChromeOperatingHandForStatus(
+    status: motion.OperatingHandStatus
+  ): BrowserChromeOperatingHand {
+    if (status === motion.OperatingHandStatus.LEFT_HAND_OPERATED) {
+      return BrowserChromeOperatingHand.LEFT;
+    }
+    if (status === motion.OperatingHandStatus.RIGHT_HAND_OPERATED) {
+      return BrowserChromeOperatingHand.RIGHT;
+    }
+    return BrowserChromeOperatingHand.UNKNOWN;
+  }
+
+  private updateBrowserChromeOperatingHand(status: motion.OperatingHandStatus): void {
+    this.updateBrowserChromeAnchor(
+      browserChromeAnchorForOperatingHand(this.browserChromeOperatingHandForStatus(status)),
+      'operating_hand',
+      status
+    );
+  }
+
+  private observeOperatingHandFallback(): void {
+    const listener = (status: motion.OperatingHandStatus): void => {
+      this.updateBrowserChromeOperatingHand(status);
+    };
+    try {
+      motion.on('operatingHandChanged', listener);
+      this.operatingHandListener = listener;
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_fallback_observation_started source=operating_hand'
+      );
+      try {
+        this.updateBrowserChromeOperatingHand(motion.getRecentOperatingHandStatus());
+      } catch (error) {
+        const errorCode: number = (error as BusinessError).code ?? -1;
+        hilog.info(
+          BROWSER_WEB_DOMAIN,
+          BROWSER_WEB_TAG,
+          'smart_reach_fallback_initial_status_unavailable code=%{public}d',
+          errorCode
+        );
+      }
+    } catch (error) {
+      const errorCode: number = (error as BusinessError).code ?? -1;
+      const errorMessage: string = (error as BusinessError).message ?? 'unknown';
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_unavailable source=holding_and_operating code=%{public}d message=%{public}s anchor=center',
+        errorCode,
+        errorMessage
+      );
+    }
+  }
+
+  private observeHoldingHand(): void {
+    if (!canIUse('SystemCapability.MultimodalAwareness.Motion')) {
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_unavailable capability=false anchor=center'
+      );
+      return;
+    }
+    this.stopHoldingHandObservation();
+    const listener = (status: motion.HoldingHandStatus): void => {
+      this.updateBrowserChromeHandedness(status);
+    };
+    try {
+      motion.on('holdingHandChanged', listener);
+      this.holdingHandListener = listener;
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_observation_started'
+      );
+    } catch (error) {
+      const errorCode: number = (error as BusinessError).code ?? -1;
+      const errorMessage: string = (error as BusinessError).message ?? 'unknown';
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_holding_observation_unavailable code=%{public}d message=%{public}s fallback=operating_hand',
+        errorCode,
+        errorMessage
+      );
+      this.observeOperatingHandFallback();
+    }
+  }
+
+  private stopHoldingHandObservation(): void {
+    const holdingListener: ((status: motion.HoldingHandStatus) => void) | undefined =
+      this.holdingHandListener;
+    this.holdingHandListener = undefined;
+    if (holdingListener !== undefined) {
+      try {
+        motion.off('holdingHandChanged', holdingListener);
+      } catch (error) {
+        const errorCode: number = (error as BusinessError).code ?? -1;
+        hilog.warn(
+          BROWSER_WEB_DOMAIN,
+          BROWSER_WEB_TAG,
+          'smart_reach_holding_observation_stop_failed code=%{public}d',
+          errorCode
+        );
+      }
+    }
+    const operatingListener: ((status: motion.OperatingHandStatus) => void) | undefined =
+      this.operatingHandListener;
+    this.operatingHandListener = undefined;
+    if (operatingListener !== undefined) {
+      try {
+        motion.off('operatingHandChanged', operatingListener);
+      } catch (error) {
+        const errorCode: number = (error as BusinessError).code ?? -1;
+        hilog.warn(
+          BROWSER_WEB_DOMAIN,
+          BROWSER_WEB_TAG,
+          'smart_reach_operating_observation_stop_failed code=%{public}d',
+          errorCode
+        );
+      }
+    }
+    if (holdingListener !== undefined || operatingListener !== undefined) {
+      hilog.info(
+        BROWSER_WEB_DOMAIN,
+        BROWSER_WEB_TAG,
+        'smart_reach_observation_stopped'
+      );
     }
   }
 
@@ -1570,6 +1848,11 @@ export struct BrowserShell {
     );
   }
 
+  private scenePreferredAddressLabel(): string {
+    const tab: BrowserTabRecord | undefined = this.sceneTabForRender();
+    return tab === undefined ? '' : this.preferredAddressLabelsByTab.get(tab.id) ?? '';
+  }
+
   private previewTab(): BrowserTabRecord | undefined {
     if (this.previewIndex < 0 || this.previewIndex >= this.tabStore.tabs.length) {
       return undefined;
@@ -1718,6 +2001,7 @@ export struct BrowserShell {
     this.errorStatesByTab.delete(tabId);
     this.addressPresentationByTab.delete(tabId);
     this.searchLabelsByTab.delete(tabId);
+    this.preferredAddressLabelsByTab.delete(tabId);
     this.searchQueriesByTab.delete(tabId);
     this.pendingSearchNavigationByTab.delete(tabId);
     this.searchResultSettledAtByTab.delete(tabId);
@@ -1939,6 +2223,7 @@ export struct BrowserShell {
     if (tabId !== this.tabStore.activeTabId) {
       return;
     }
+    this.resetBottomChromeScroll(tabId);
     this.pageDisplayState = {
       fontSize: this.pageDisplayState.fontSize,
       fullScreen: enabled
@@ -2402,10 +2687,18 @@ export struct BrowserShell {
 
   private async initializeSession(): Promise<void> {
     this.browserSettings = await this.repository?.loadSettings() ?? copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
+    const savedPageIcons: PageIconRecord[] = await this.repository?.listPageIcons() ?? [];
+    const pageIconFileStore: PageIconFileStore | undefined = this.pageIconFileStore;
+    this.pageIconItems = pageIconFileStore === undefined
+      ? []
+      : savedPageIcons.filter((record: PageIconRecord) => pageIconFileStore.exists(record.localPath));
+    this.pageIconRevision += 1;
     this.startPageItems = await this.repository?.listStartPageItems() ?? [];
+    this.bookmarkItems = await this.repository?.listBookmarks() ?? [];
+    this.syncStartPageBookmarks();
+    this.ensureBookmarkSectionVisible();
     this.historyItems = await this.repository?.listHistory() ?? [];
     this.bumpHistoryRevision();
-    this.syncFrequentSites(this.historyItems);
     const closedTabs = await this.repository?.loadClosedTabs() ?? [];
     closedTabs.forEach((record) => this.closedTabStack.push(record));
     const snapshot: BrowserSessionSnapshot | undefined = await this.repository?.loadSession();
@@ -2455,6 +2748,47 @@ export struct BrowserShell {
     if (pendingExternalUrl !== undefined) {
       setTimeout(() => this.openExternalUrl(pendingExternalUrl), 0);
     }
+  }
+
+  private async handleFaviconReceived(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    favicon: image.PixelMap
+  ): Promise<void> {
+    const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+      (item: BrowserTabRecord) => item.id === tabId
+    );
+    const repository: BrowserRepository | undefined = this.repository;
+    const fileStore: PageIconFileStore | undefined = this.pageIconFileStore;
+    if (tab === undefined || tab.isPrivate || repository === undefined || fileStore === undefined) {
+      return;
+    }
+    let reportedUrl: string = '';
+    try {
+      reportedUrl = controller.getUrl();
+    } catch (_error) {
+      reportedUrl = '';
+    }
+    const reportedCanonicalUrl: string | undefined = loadableUrlFor(reportedUrl);
+    const fallbackCanonicalUrl: string | undefined = loadableUrlFor(lastValidUrlForTab(tab));
+    const url: string | undefined = reportedCanonicalUrl === undefined
+      ? fallbackCanonicalUrl
+      : reportedCanonicalUrl;
+    if (url === undefined || url === 'about:blank') {
+      return;
+    }
+    const localPath: string | undefined = await fileStore.save(url, favicon);
+    if (localPath === undefined || !fileStore.exists(localPath)) {
+      return;
+    }
+    const record: PageIconRecord = {
+      url,
+      localPath,
+      updatedAt: Date.now()
+    };
+    this.pageIconItems = upsertPageIconRecord(this.pageIconItems, record);
+    this.pageIconRevision += 1;
+    await repository.savePageIcon(record);
   }
 
   private openExternalUrl(url: string): void {
@@ -2686,7 +3020,8 @@ export struct BrowserShell {
   private loadAddress(
     value: string,
     reason: string = 'address-submit',
-    caller: string = 'BrowserShell.loadAddress'
+    caller: string = 'BrowserShell.loadAddress',
+    initialTitle: string = ''
   ): void {
     this.clearHistorySuppression();
     // Classify the raw input before normalization. Search-result URLs must not
@@ -2726,7 +3061,17 @@ export struct BrowserShell {
     } else {
       this.searchLabelsByTab.set(activeId, submittedSearchLabel);
     }
-    const submittedTitle: string = submittedSearchLabel ?? '';
+    const submittedTitle: string = submittedSearchLabel !== undefined
+      ? submittedSearchLabel
+      : submittedMode === AddressBarPresentationMode.URL
+        ? initialTitle.trim()
+        : '';
+    const preferredAddressLabel: string = initialTitle.trim();
+    if (submittedMode === AddressBarPresentationMode.URL && preferredAddressLabel.length > 0) {
+      this.preferredAddressLabelsByTab.set(activeId, preferredAddressLabel);
+    } else {
+      this.preferredAddressLabelsByTab.delete(activeId);
+    }
     // A newly-created about:blank tab is rendered by the native start page and
     // intentionally has no ArkWeb runtime yet.  The first explicit address
     // submission is the boundary at which that tab becomes a web tab.  Commit
@@ -2943,6 +3288,7 @@ export struct BrowserShell {
     // address slot, so the handoff layer has no empty frame to cover.
     this.attachCurrentHosts();
     this.resetTabViewState(newTabId);
+    this.resetBottomChromeScroll(newTabId);
     this.addressEditing = false;
     this.resetAddressDraft();
     this.scheduleHostReattach(newTabId);
@@ -3171,6 +3517,8 @@ export struct BrowserShell {
     }
     await repository.addBookmark(record, false);
     this.bookmarkItems = await repository.listBookmarks();
+    this.syncStartPageBookmarks();
+    this.ensureBookmarkSectionVisible();
   }
 
   private applyUserAgentMode(
@@ -3405,29 +3753,11 @@ export struct BrowserShell {
     }
   }
 
-  private updateStartPageItems(items: StartPageItem[]): void {
-    this.startPageItems = items.map((item: StartPageItem) => copyStartPageItem(item));
-    void this.repository?.saveStartPageItems(this.startPageItems);
-  }
-
   private addActiveFavorite(): void {
-    const tab: BrowserTabRecord | undefined = this.activeTab();
-    if (tab === undefined || tab.isPrivate || tab.url === 'about:blank') {
-      return;
-    }
-    if (this.startPageItems.some((item: StartPageItem) => item.type === StartPageItemType.FAVORITE && item.url === tab.url)) {
-      return;
-    }
-    const item: StartPageItem = {
-      id: `favorite-${Date.now()}`,
-      type: StartPageItemType.FAVORITE,
-      title: tab.title.length > 0 ? tab.title : tab.url,
-      url: tab.url,
-      order: this.startPageItems.filter((entry: StartPageItem) => entry.type === StartPageItemType.FAVORITE).length,
-      updatedAt: Date.now()
-    };
-    this.startPageItems = [...this.startPageItems, item];
-    void this.repository?.saveStartPageItems(this.startPageItems);
+    // Keep the legacy start-page action on the same source of truth as the
+    // browser bookmark action so the tile survives restart and appears in the
+    // library as well as on the start page.
+    void this.addActiveBookmark();
   }
 
   private async openLibrary(): Promise<void> {
@@ -3453,6 +3783,7 @@ export struct BrowserShell {
     }
     await repository.removeBookmark(url);
     this.bookmarkItems = await repository.listBookmarks();
+    this.syncStartPageBookmarks();
   }
 
   private async removeHistory(entry: LibraryEntry): Promise<void> {
@@ -3476,7 +3807,6 @@ export struct BrowserShell {
       return true;
     });
     this.bumpHistoryRevision();
-    this.syncFrequentSites(this.historyItems);
     await repository.removeHistoryEntry({
       url: entry.url,
       title: entry.title,
@@ -3484,7 +3814,6 @@ export struct BrowserShell {
     });
     this.historyItems = await repository.listHistory();
     this.bumpHistoryRevision();
-    this.syncFrequentSites(this.historyItems);
   }
 
   private async removeHistoryRange(range: HistoryDeleteRange): Promise<void> {
@@ -3503,7 +3832,6 @@ export struct BrowserShell {
     }
     this.historyItems = await repository.listHistory();
     this.bumpHistoryRevision();
-    this.syncFrequentSites(this.historyItems);
   }
 
   private openLibraryEntry(url: string): void {
@@ -3607,6 +3935,7 @@ export struct BrowserShell {
     if (isOverviewSettled(this.overviewProgress)) {
       return;
     }
+    this.resetBottomChromeScroll();
     this.setTransitionStatusBarOpaque(true);
     const openToken: number = this.overviewOpenToken + 1;
     this.overviewOpenToken = openToken;
@@ -3808,6 +4137,7 @@ export struct BrowserShell {
       (tab: BrowserTabRecord) => tab.id === targetTabId
     );
     this.restoreTabViewState(targetTabId);
+    this.resetBottomChromeScroll(targetTabId);
     this.resetAddressDraft();
     this.refreshNavigationState();
     this.gestureActive = false;
@@ -3903,20 +4233,23 @@ export struct BrowserShell {
     return true;
   }
 
-  /** Keep only explicit favorites on the start page; history is library-only. */
-  private syncFrequentSites(_history: HistoryRecord[]): void {
-    const favorites: StartPageItem[] = this.startPageItems
-      .filter((item: StartPageItem) => item.type === StartPageItemType.FAVORITE)
-      .map((item: StartPageItem, index: number): StartPageItem => ({
-        id: item.id,
-        type: item.type,
-        title: item.title,
-        url: item.url,
-        order: index,
-        updatedAt: item.updatedAt
-      }));
-    this.startPageItems = favorites;
+  /** Keep the start-page bookmark projection synchronized with the library. */
+  private syncStartPageBookmarks(): void {
+    this.startPageItems = mergeBookmarkedStartPageItems(this.startPageItems, this.bookmarkItems);
     void this.repository?.saveStartPageItems(this.startPageItems);
+  }
+
+  /** Existing bookmarks should be visible after upgrading from the old default. */
+  private ensureBookmarkSectionVisible(): void {
+    if (this.bookmarkItems.length === 0 || this.browserSettings.showFavorites ||
+      this.browserSettings.startPageSectionsConfigured) {
+      return;
+    }
+    const next: BrowserSettings = copyBrowserSettings(this.browserSettings);
+    next.showFavorites = true;
+    next.startPageSectionsConfigured = true;
+    this.browserSettings = next;
+    void this.repository?.saveSettings(next);
   }
 
   private bumpHistoryRevision(): void {
@@ -3995,7 +4328,6 @@ export struct BrowserShell {
     }, false);
     this.historyItems = await repository.listHistory();
     this.bumpHistoryRevision();
-    this.syncFrequentSites(this.historyItems);
   }
 
   private invalidateHorizontalTabHandoff(): void {
@@ -5044,6 +5376,7 @@ export struct BrowserShell {
     this.transitionProgress = 0;
     this.logAddressGestureState('rebase', true, false);
     this.restoreTabViewState(targetId);
+    this.resetBottomChromeScroll(targetId);
     this.resetAddressDraft();
     this.refreshNavigationState();
     this.overviewProgress = 0;
@@ -5115,21 +5448,133 @@ export struct BrowserShell {
   }
 
   private bottomBrowserBarSurfaceHeight(): number {
-    return SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + Math.max(0, this.bottomAvoidInset);
+    return safariBottomChromeLayoutHeight(this.bottomAvoidInset);
   }
 
   private bottomBrowserBarHeight(): number {
+    return safariBottomChromeVisualHeight(this.bottomAvoidInset);
+  }
+
+  private bottomBrowserBarPositionLayerHeight(): number {
     return this.bottomBrowserBarSurfaceHeight() + SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP;
   }
 
+  private bottomChromeScrollEligible(): boolean {
+    return this.shouldRenderBottomBrowserBar() &&
+      this.overviewProgress <= 0 &&
+      !this.overviewClosing &&
+      !this.overviewAnimationClosing &&
+      !this.gestureActive &&
+      !this.isDragging &&
+      this.gestureState === TabGestureState.IDLE &&
+      !this.showLibrary &&
+      !this.showStartPageCustomize &&
+      !this.showDownloadManager &&
+      !this.addressEditing;
+  }
+
+  private resetBottomChromeScroll(tabId: TabId = this.tabStore.activeTabId): void {
+    this.lastWebScrollOffsetByTab.delete(tabId);
+    if (tabId === this.tabStore.activeTabId) {
+      this.setBottomChromeScrollHidden(false);
+    }
+  }
+
+  private setBottomChromeScrollHidden(hidden: boolean): void {
+    if (this.bottomChromeScrollTargetHidden === hidden) {
+      return;
+    }
+    this.bottomChromeScrollTargetHidden = hidden;
+    hilog.info(
+      BROWSER_WEB_DOMAIN,
+      BROWSER_WEB_TAG,
+      'bottom_chrome_scroll_state=%{public}s',
+      hidden ? 'hidden' : 'visible'
+    );
+    const animationToken: number = this.bottomChromeScrollAnimationToken + 1;
+    this.bottomChromeScrollAnimationToken = animationToken;
+    try {
+      this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+        if (animationToken === this.bottomChromeScrollAnimationToken) {
+          this.bottomChromeScrollHidden = hidden;
+        }
+      });
+    } catch (_error) {
+      if (animationToken === this.bottomChromeScrollAnimationToken) {
+        this.bottomChromeScrollHidden = hidden;
+      }
+    }
+  }
+
+  private handleWebPageScroll(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    yOffset: number
+  ): void {
+    if (tabId !== this.tabStore.activeTabId) {
+      return;
+    }
+    const activeController: webview.WebviewController | undefined =
+      this.runtimePort?.controllerFor(tabId);
+    if (activeController !== undefined && activeController !== controller) {
+      return;
+    }
+    const boundedOffset: number = Math.max(0, Number.isFinite(yOffset) ? yOffset : 0);
+    const previousOffset: number | undefined = this.lastWebScrollOffsetByTab.get(tabId);
+    if (boundedOffset <= 0) {
+      this.lastWebScrollOffsetByTab.set(tabId, 0);
+      this.setBottomChromeScrollHidden(false);
+      return;
+    }
+    if (previousOffset === undefined) {
+      this.lastWebScrollOffsetByTab.set(tabId, boundedOffset);
+      return;
+    }
+    const direction: BrowserChromeScrollDirection = browserChromeScrollDirection(
+      previousOffset,
+      boundedOffset
+    );
+    if (direction === BrowserChromeScrollDirection.NONE) {
+      return;
+    }
+    // Keep the last threshold-crossing offset as the next baseline. This
+    // accumulates many small Web.onScroll samples without reacting to noise.
+    this.lastWebScrollOffsetByTab.set(tabId, boundedOffset);
+    if (!this.bottomChromeScrollEligible()) {
+      this.setBottomChromeScrollHidden(false);
+      return;
+    }
+    const nextHidden: boolean = bottomChromeHiddenForScroll(
+      this.bottomChromeScrollHidden,
+      previousOffset,
+      boundedOffset
+    );
+    this.setBottomChromeScrollHidden(nextHidden);
+  }
+
+  private hideBottomChromeForRender(): boolean {
+    return this.bottomChromeScrollHidden &&
+      this.overviewProgress <= 0 &&
+      !this.overviewClosing &&
+      !this.overviewAnimationClosing;
+  }
+
+  private bottomChromeScrollOpacityForRender(): number {
+    return this.hideBottomChromeForRender() ? 0 : 1;
+  }
+
+  private bottomChromeScrollTranslateYForRender(): number {
+    return this.hideBottomChromeForRender() ? this.bottomBrowserBarHeight() : 0;
+  }
+
   private browserChromeFrame(): BrowserChromeLayoutFrame {
-    // CENTER is today's policy. START and END remain model-level options for
-    // a future left/right handed grip preference without changing this tree.
+    // Smart reach selects only the horizontal anchor. The same fixed-width
+    // frame and safe-area calculation are reused in every orientation.
     return browserChromeLayoutFrame(
       this.viewportWidth,
       this.leftAvoidInset,
       this.rightAvoidInset,
-      BrowserChromeAnchor.CENTER
+      this.browserChromeAnchor
     );
   }
 
@@ -5263,6 +5708,7 @@ export struct BrowserShell {
           this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
         address: this.sceneAddress(),
         searchQuery: this.sceneSearchQuery(),
+        preferredLabel: this.scenePreferredAddressLabel(),
         addressDraft: this.draftForSceneTab(),
         isPrivate: this.sceneTabForRender()?.isPrivate ?? false,
         pageTitle: this.sceneActiveTab === undefined ? '' : this.sceneActiveTab.title,
@@ -5315,7 +5761,15 @@ export struct BrowserShell {
         .width('100%')
         .height('100%')
         .align(Alignment.TopStart)
-        .hitTestBehavior(HitTestMode.Transparent)
+        .opacity(this.bottomChromeScrollOpacityForRender())
+        .translate({
+          x: 0,
+          y: this.bottomChromeScrollTranslateYForRender(),
+          z: 0
+        })
+        .hitTestBehavior(
+          this.hideBottomChromeForRender() ? HitTestMode.None : HitTestMode.Transparent
+        )
         .id('floating-address-transition-layer')
         .zIndex(tabOverviewAddressLayerZIndex());
     }
@@ -5383,8 +5837,15 @@ export struct BrowserShell {
             interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
               this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
             currentItems: this.startPageItems,
+            pageIcons: this.pageIconItems,
+            pageIconRevision: this.pageIconRevision,
             errorState: this.errorState,
-            onOpen: (url: string) => this.loadAddress(url, 'start-page-entry', 'BrowserTransitionScene.onOpen'),
+            onOpen: (url: string, title?: string) => this.loadAddress(
+              url,
+              'start-page-entry',
+              'BrowserTransitionScene.onOpen',
+              title ?? ''
+            ),
             onAddFavorite: () => this.addActiveFavorite(),
             onCustomize: () => this.customizeStartPage(),
             onNavigate: (value: string) => this.loadAddress(value, 'start-page-address', 'BrowserTransitionScene.onNavigate'),
@@ -5426,6 +5887,7 @@ export struct BrowserShell {
               pendingTab: this.pendingTabForRender(),
               address: this.sceneAddress(),
               searchQuery: this.sceneSearchQuery(),
+              preferredLabel: this.scenePreferredAddressLabel(),
               pageTitle: this.sceneActiveTab === undefined ? '' : this.sceneActiveTab.title,
               addressDraft: this.draftForSceneTab(),
               tabCount: this.tabStore.tabs.length,
@@ -5504,7 +5966,7 @@ export struct BrowserShell {
           }
             .id('floating-tab-bar-position-layer')
             .width(this.browserChromeFrame().width)
-            .height(this.bottomBrowserBarHeight())
+            .height(this.bottomBrowserBarPositionLayerHeight())
             .padding({
               left: SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
               right: SAFARI_BOTTOM_CHROME_HORIZONTAL_INSET_VP,
@@ -5514,7 +5976,8 @@ export struct BrowserShell {
             // The overview release animator drives this transform through the
             // same progress as the live page. Entry moves the bar downward;
             // reverse expansion brings it back from the bottom edge.
-            .opacity(this.overviewChromeFrameForRender().toolbarOpacity)
+            .opacity(this.overviewChromeFrameForRender().toolbarOpacity *
+              this.bottomChromeScrollOpacityForRender())
             .scale({
               x: this.overviewChromeFrameForRender().toolbarScaleX * this.startPageCustomizeSqueezeScaleX(),
               y: this.overviewChromeFrameForRender().toolbarScaleY * this.startPageCustomizeSqueezeScaleY(),
@@ -5523,7 +5986,8 @@ export struct BrowserShell {
             .translate({
               x: this.browserChromeCenterOffset(),
               y: this.overviewChromeFrameForRender().toolbarTranslateY +
-                this.startPageCustomizeSqueezeTranslateY(),
+                this.startPageCustomizeSqueezeTranslateY() +
+                this.bottomChromeScrollTranslateYForRender(),
               z: 0
             })
             // The fixed surface stays mounted at the settled overview
@@ -5535,7 +5999,7 @@ export struct BrowserShell {
                 this.overviewProgress,
                 this.gestureActive && !this.addressGestureFinished,
                 this.overviewClosing || this.overviewAnimationClosing
-              )
+              ) || this.hideBottomChromeForRender()
                 ? HitTestMode.None
                 : HitTestMode.Default
             )
@@ -5556,6 +6020,9 @@ export struct BrowserShell {
             topInset: this.topAvoidInset,
             viewportWidth: this.viewportWidth,
             viewportHeight: this.viewportHeight,
+            leftAvoidInset: this.leftAvoidInset,
+            rightAvoidInset: this.rightAvoidInset,
+            chromeAnchor: this.browserChromeAnchor,
             gridScrollOffset: this.overviewGridScrollOffset,
             onSearchProgress: (progress: number) => this.updateOverviewSearchProgress(progress),
             onGridScroll: (offset: number) => this.updateOverviewGridScrollOffset(offset),
@@ -5633,8 +6100,14 @@ export struct BrowserShell {
             history: this.historyItems,
             historyRevision: this.historyRevision,
             bookmarks: this.bookmarkItems,
+            pageIcons: this.pageIconItems,
+            pageIconRevision: this.pageIconRevision,
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
+            viewportWidth: this.viewportWidth,
+            leftInset: this.leftAvoidInset,
+            rightInset: this.rightAvoidInset,
+            chromeAnchor: this.browserChromeAnchor,
             onOpen: (url: string) => this.openLibraryEntry(url),
             onRemoveBookmark: (url: string) => { void this.removeBookmark(url); },
             onRemoveHistory: (entry: LibraryEntry) => { void this.removeHistory(entry); },
@@ -5664,11 +6137,13 @@ export struct BrowserShell {
         if (this.showStartPageCustomize && !this.showDownloadManager && this.overviewProgress === 0) {
           StartPageCustomizeSheet({
             settings: this.browserSettings,
-            items: this.startPageItems,
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
+            viewportWidth: this.viewportWidth,
+            leftInset: this.leftAvoidInset,
+            rightInset: this.rightAvoidInset,
+            chromeAnchor: this.browserChromeAnchor,
             onSettingsChange: (settings: BrowserSettings) => this.updateStartPageSettings(settings),
-            onItemsChange: (items: StartPageItem[]) => this.updateStartPageItems(items),
             onSelectBackground: () => { void this.chooseStartPageBackground(); },
             onAdjustBackground: () => this.adjustCurrentStartPageBackground(),
             onClose: () => this.closeStartPageCustomize(),

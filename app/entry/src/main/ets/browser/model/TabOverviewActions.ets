@@ -127,8 +127,8 @@ export const TAB_OVERVIEW_SPRING_STIFFNESS: number = 228;
 export const TAB_OVERVIEW_SPRING_DAMPING: number = 30;
 export const TAB_OVERVIEW_SPRING_MAX_NORMALIZED_VELOCITY: number = 3;
 
-/** Short, reversible handoff that removes the normal page's top safe area. */
-export const TAB_OVERVIEW_SAFE_INSET_HANDOFF_PROGRESS: number = 0.08;
+/** Spread the page's top safe-area handoff across the complete overview morph. */
+export const TAB_OVERVIEW_SAFE_INSET_HANDOFF_PROGRESS: number = 1;
 
 /** Case-insensitive title/URL search used by the tab overview search field. */
 export function filterTabsByQuery(tabs: BrowserTabRecord[], query: string): BrowserTabRecord[] {
@@ -583,11 +583,11 @@ export function tabOverviewLocalPageClipFrame(
  * overview morph, however, the page is already positioned inside the card's
  * transformed coordinate space. Applying the same inset to NodeContainer a
  * second time leaves a visible gap between the blue card outline and the
- * page image. Keep the normal inset at the identity frame, then hand it off
- * over a short smooth segment so the transformed frame owns the complete
- * page viewport without a first-frame jump. The grid and card frame already
- * own the safe-area spacing; retaining it after the handoff would scale a
- * white strip into the card's top edge.
+ * page image. Keep the normal inset at the identity frame and hand it off over
+ * the same full progress track as the page transform. The grid and card frame
+ * already own the safe-area spacing; retaining it after the handoff would
+ * scale a white strip into the card's top edge. Spreading this offset across
+ * the morph prevents the whole page from moving after its edges have settled.
  */
 export function tabOverviewLivePageContentTop(
   frame: TabOverviewPageFrame | undefined,
@@ -602,9 +602,8 @@ export function tabOverviewLivePageContentTop(
     return safeInset;
   }
   const handoff: number = Math.min(1, progress / TAB_OVERVIEW_SAFE_INSET_HANDOFF_PROGRESS);
-  // Smoothstep keeps both the first frame and the zero-inset endpoint
-  // velocity-neutral, so reverse expansion does not visibly spring at either
-  // end of the safe-area handoff.
+  // Smoothstep keeps the top inset aligned with the page's scale and clip
+  // changes, including a zero-velocity start and finish.
   const eased: number = handoff * handoff * (3 - 2 * handoff);
   return safeInset * (1 - eased);
 }

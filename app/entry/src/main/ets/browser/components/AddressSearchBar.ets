@@ -92,6 +92,7 @@ export function downloadProgressRingProps(
 export struct AddressSearchBar {
   @Param address: string = '';
   @Param pageTitle: string = '';
+  @Param preferredLabel: string = '';
   @Param searchQuery: string = '';
   @Param initialDraft: string = '';
   @Param inputIdentity: string = 'unknown';
@@ -210,7 +211,7 @@ export struct AddressSearchBar {
     if (searchQuery !== undefined) {
       return searchQuery;
     }
-    const label: string = addressBarLabelFor(this.address, this.pageTitle);
+    const label: string = addressBarLabelFor(this.address, this.pageTitle, this.preferredLabel);
     const searchSuffix: string = ' - 搜索';
     if (label.endsWith(searchSuffix)) {
       return searchQueryTextFor(label.slice(0, label.length - searchSuffix.length));

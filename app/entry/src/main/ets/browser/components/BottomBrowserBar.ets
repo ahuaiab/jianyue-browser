@@ -1,6 +1,5 @@
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
-import { uiMaterial } from '@kit.ArkUI';
 import { BrowserTabRecord, PendingTabDraft } from '../model/BrowserTypes';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
 import { TabPreviewKind } from '../model/TabGestureMotion';
@@ -8,11 +7,16 @@ import { TouchOwner } from '../gesture/TouchOwnership';
 import { AddressTabStrip } from './AddressTabStrip';
 import { BrowserActionToolbar } from './BrowserActionToolbar';
 import {
+  safariImmersiveMaterial,
+  safariImmersiveMaterialSupported
+} from '../model/BrowserMaterial';
+import {
   SAFARI_ADDRESS_ROW_HEIGHT_VP,
-  SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP,
-  SAFARI_BOTTOM_CHROME_FALLBACK_COLOR,
-  SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
-  SAFARI_BOTTOM_CHROME_RADIUS_VP
+  SAFARI_BOTTOM_CHROME_RADIUS_VP,
+  safariChromeSurfaceBackgroundColor,
+  safariBottomChromeLayoutHeight,
+  safariBottomChromePaintedHeight,
+  safariBottomChromeUnpaintedAvoidAreaHeight
 } from '../model/BrowserVisualMetrics';
 
 export function bottomBrowserBarDownloadSnapshot(
@@ -27,6 +31,7 @@ export struct BottomBrowserBar {
   @Param pendingTab: PendingTabDraft | undefined = undefined;
   @Param address: string = '';
   @Param pageTitle: string = '';
+  @Param preferredLabel: string = '';
   @Param searchQuery: string = '';
   @Param addressDraft: string = '';
   @Param tabCount: number = 1;
@@ -87,7 +92,7 @@ export struct BottomBrowserBar {
   @Param onBack: () => void = () => undefined;
   @Param onForward: () => void = () => undefined;
 
-  private immersiveMaterialSupported: boolean = uiMaterial.isImmersiveMaterialSupported();
+  private immersiveMaterialSupported: boolean = safariImmersiveMaterialSupported();
 
   build() {
     Column() {
@@ -100,6 +105,7 @@ export struct BottomBrowserBar {
           address: this.address, searchQuery: this.searchQuery,
           addressDraft: this.addressDraft, isPrivate: this.isPrivate,
           pageTitle: this.pageTitle,
+          preferredLabel: this.preferredLabel,
           previewKind: this.previewKind,
           newTabProgress: this.newTabProgress,
           addressHandoffMounted: this.addressHandoffMounted,
@@ -141,29 +147,23 @@ export struct BottomBrowserBar {
         });
       }
         .width('100%')
-        .height(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP);
-      Blank()
-        .width('100%')
-        .height(Math.max(0, this.bottomInset));
-    }
+        .height(safariBottomChromePaintedHeight())
       .id('safari-bottom-chrome')
-      .width('100%')
-      .height(SAFARI_BOTTOM_CHROME_BASE_HEIGHT_VP + Math.max(0, this.bottomInset))
-      .backgroundColor(SAFARI_BOTTOM_CHROME_FALLBACK_COLOR)
+      .backgroundColor(safariChromeSurfaceBackgroundColor(this.immersiveMaterialSupported))
       .borderRadius({ topLeft: SAFARI_BOTTOM_CHROME_RADIUS_VP,
         topRight: SAFARI_BOTTOM_CHROME_RADIUS_VP,
         bottomLeft: SAFARI_BOTTOM_CHROME_RADIUS_VP,
         bottomRight: SAFARI_BOTTOM_CHROME_RADIUS_VP })
       .clip(true)
       .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
-      .systemMaterial(this.immersiveMaterialSupported
-        ? new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.THICK,
-          materialColor: SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
-          applyShadow: true,
-          interactive: true,
-          lightEffect: { color: undefined }
-        })
-        : undefined);
+      .systemMaterial(this.immersiveMaterialSupported ? safariImmersiveMaterial() : undefined);
+      Blank()
+        .width('100%')
+        .height(safariBottomChromeUnpaintedAvoidAreaHeight(this.bottomInset));
+    }
+      .id('safari-bottom-chrome-layout')
+      .width('100%')
+      .height(safariBottomChromeLayoutHeight(this.bottomInset))
+      .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY);
   }
 }

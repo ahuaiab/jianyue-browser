@@ -1,5 +1,4 @@
 import { image } from '@kit.ImageKit';
-import { uiMaterial } from '@kit.ArkUI';
 import { BrowserTabRecord, GestureSample, TabId } from '../model/BrowserTypes';
 import {
   filterTabsByQuery,
@@ -23,7 +22,15 @@ import {
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
 import { TabCard } from './TabCard';
-import { HARMONY_RADIUS_FLOATING } from '../model/BrowserVisualMetrics';
+import {
+  BrowserChromeAnchor,
+  browserChromeFloatingControlOffset,
+  HARMONY_RADIUS_FLOATING
+} from '../model/BrowserVisualMetrics';
+import {
+  safariImmersiveMaterialIfSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../model/BrowserMaterial';
 
 /**
  * Safari-like tab overview reconstructed from the 1:20–2:04 video segment.
@@ -47,6 +54,9 @@ export struct TabOverview {
   @Param topInset: number = 0;
   @Param viewportWidth: number = 400;
   @Param viewportHeight: number = 800;
+  @Param leftAvoidInset: number = 0;
+  @Param rightAvoidInset: number = 0;
+  @Param chromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
   @Param gridScrollOffset: number = -1;
   @Param bottomInset: number = 0;
   @Param thumbnailFor: (tabId: TabId) => image.PixelMap | undefined =
@@ -482,16 +492,25 @@ export struct TabOverview {
       }
         .width(108)
         .height(52)
+        // The overview toolbar is an independent floating control. Keep its
+        // width and centered fallback, but let the shared smart-reach anchor
+        // move it inside the same horizontal safe region as the browser bar.
+        .translate({
+          x: browserChromeFloatingControlOffset(
+            this.viewportWidth,
+            this.leftAvoidInset,
+            this.rightAvoidInset,
+            108,
+            this.chromeAnchor
+          ),
+          y: 0
+        })
         .padding({ left: 8, right: 8 })
         .justifyContent(FlexAlign.SpaceBetween)
-        .backgroundColor('#D9F2F2F7')
+        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
         .borderRadius(HARMONY_RADIUS_FLOATING)
         .clip(true)
-        .shadow({ radius: 16, color: '#28000000', offsetX: 0, offsetY: 4 })
-        .systemMaterial(new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-          interactive: false
-        }));
+        .systemMaterial(safariImmersiveMaterialIfSupported());
     }
       .id('tab-overview-bottom-toolbar')
       .width('100%')

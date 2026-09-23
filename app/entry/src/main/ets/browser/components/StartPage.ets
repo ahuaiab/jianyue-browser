@@ -1,8 +1,19 @@
 import { BrowserSettings } from '../model/BrowserSettings';
+import { pageIconPathForUrl, PageIconRecord } from '../model/PageIconModels';
+import fileUri from '@ohos.file.fileuri';
+import {
+  safariImmersiveControlMaterialIfSupported,
+  safariImmersiveMaterial,
+  safariImmersiveMaterialSupported,
+  safariImmersiveSurfaceBackgroundColor
+} from '../model/BrowserMaterial';
 import {
   shouldRenderStartPageSection,
   sortStartPageItems,
   startPageBackgroundSource,
+  startPageContentSurfaceColor,
+  startPageUsesImmersiveSurface,
+  startPageItemNavigationTitle,
   StartPageItem,
   StartPageItemType
 } from '../model/StartPageModels';
@@ -18,16 +29,37 @@ import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 @ComponentV2
 export struct StartPage {
   @Param items: StartPageItem[] = [];
+  @Param pageIcons: PageIconRecord[] = [];
+  @Param pageIconRevision: number = 0;
   @Require @Param settings: BrowserSettings;
-  @Param onOpen: (url: string) => void = (_url: string) => undefined;
+  @Param onOpen: (url: string, title?: string) => void = (_url: string, _title?: string) => undefined;
   @Param onAddFavorite: () => void = () => undefined;
   @Param onCustomize: () => void = () => undefined;
   @Param pageTranslateX: number = 0;
   /** Height of the page surface that remains visible above browser chrome. */
   @Param backgroundViewportHeight: number = 0;
 
+  private immersiveMaterialSupported: boolean = safariImmersiveMaterialSupported();
+
   private itemsFor(type: StartPageItemType): StartPageItem[] {
     return sortStartPageItems(this.items.filter((item: StartPageItem) => item.type === type));
+  }
+
+  private iconPathFor(url: string): string {
+    void this.pageIconRevision;
+    return pageIconPathForUrl(this.pageIcons, url) ?? '';
+  }
+
+  private iconSourceFor(url: string): string {
+    const path: string = this.iconPathFor(url);
+    if (path.length === 0) {
+      return '';
+    }
+    try {
+      return fileUri.getUriFromPath(path);
+    } catch (_error) {
+      return '';
+    }
   }
 
   private sectionTitle(type: StartPageItemType): string {
@@ -45,6 +77,21 @@ export struct StartPage {
 
   private selectedBackgroundSource(): string {
     return startPageBackgroundSource(this.settings.startPageBackgroundId) ?? '';
+  }
+
+  private startPageSurfaceColor(): string {
+    return startPageContentSurfaceColor(
+      this.settings.startPageBackgroundId,
+      this.immersiveMaterialSupported
+    );
+  }
+
+  private startPageSurfaceInset(): number {
+    return this.selectedBackgroundSource().length > 0 ? 12 : 0;
+  }
+
+  private shouldUseImmersiveSurface(): boolean {
+    return startPageUsesImmersiveSurface(this.settings.startPageBackgroundId);
   }
 
   private backgroundHeight(): number | string {
@@ -83,7 +130,10 @@ export struct StartPage {
       .padding(0)
       .fontSize(15)
       .fontColor('#1D1D1F')
-      .backgroundColor('#F2F2F7')
+      .backgroundColor(safariImmersiveSurfaceBackgroundColor())
+      .systemMaterial(this.shouldUseImmersiveSurface()
+        ? safariImmersiveControlMaterialIfSupported()
+        : undefined)
       .onClick(() => this.onCustomize());
   }
 
@@ -91,14 +141,20 @@ export struct StartPage {
   private favoriteTile(item: StartPageItem) {
     Column({ space: 6 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.bookmark_fill'))
-          .fontSize(25)
-          .fontWeight(FontWeight.Bold)
-          .fontColor([Color.White])
+        if (this.iconSourceFor(item.url).length > 0) {
+          Image(this.iconSourceFor(item.url))
+            .width(32)
+            .height(32)
+            .objectFit(ImageFit.Contain);
+        } else {
+          SymbolGlyph($r('sys.symbol.display'))
+            .fontSize(29)
+            .fontColor(['#007AFF']);
+        }
       }
       .width(56)
       .height(56)
-      .backgroundColor('#F2F2F7')
+      .backgroundColor('#EFF5FC')
       .borderRadius(HARMONY_RADIUS_CONTROL)
 
       Text(item.title.length > 0 ? item.title : item.url)
@@ -111,22 +167,27 @@ export struct StartPage {
     .id(`start-page-favorite-${item.id}`)
     .width('100%')
     .padding({ bottom: 4 })
-    .shadow({ radius: 8, color: '#22000000', offsetX: 0, offsetY: 2 })
-    .onClick(() => this.onOpen(item.url));
+    .onClick(() => this.onOpen(item.url, startPageItemNavigationTitle(item)));
   }
 
   @Builder
   private listCard(item: StartPageItem) {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.clock'))
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor([Color.White])
+        if (this.iconSourceFor(item.url).length > 0) {
+          Image(this.iconSourceFor(item.url))
+            .width(30)
+            .height(30)
+            .objectFit(ImageFit.Contain);
+        } else {
+          SymbolGlyph($r('sys.symbol.display'))
+            .fontSize(27)
+            .fontColor(['#007AFF']);
+        }
       }
       .width(54)
       .height(54)
-      .backgroundColor('#6C84B5')
+      .backgroundColor('#EFF5FC')
       .borderRadius(HARMONY_RADIUS_CONTROL)
 
       Column({ space: 3 }) {
@@ -153,58 +214,68 @@ export struct StartPage {
     .borderRadius(HARMONY_RADIUS_CARD)
     .clip(true)
     .shadow({ radius: 8, color: '#22000000', offsetX: 0, offsetY: 2 })
-    .onClick(() => this.onOpen(item.url));
+    .onClick(() => this.onOpen(item.url, startPageItemNavigationTitle(item)));
   }
 
   @Builder
-  private section(type: StartPageItemType, visible: boolean) {
-    if (shouldRenderStartPageSection(type, visible, this.itemsFor(type).length)) {
-      Column({ space: 12 }) {
-        Row() {
-          Text(this.sectionTitle(type))
-            .fontSize(type === StartPageItemType.FAVORITE ? 22 : 20)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#1D1D1F')
-            .layoutWeight(1)
+  private section(type: StartPageItemType) {
+    Column({ space: 12 }) {
+      Row() {
+        Text(this.sectionTitle(type))
+          .fontSize(type === StartPageItemType.FAVORITE ? 22 : 20)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#1D1D1F')
+          .layoutWeight(1)
 
-          if (type !== StartPageItemType.FAVORITE) {
-            Row({ space: 4 }) {
-              Text('折叠')
-                .fontSize(14)
-                .fontColor('#5C5C60')
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(14)
-                .fontColor([Color.Gray])
-            }
+        if (type !== StartPageItemType.FAVORITE) {
+          Row({ space: 4 }) {
+            Text('折叠')
+              .fontSize(14)
+              .fontColor('#5C5C60')
+            SymbolGlyph($r('sys.symbol.chevron_down'))
+              .fontSize(14)
+              .fontColor([Color.Gray])
           }
         }
+      }
         .width('100%')
 
-        if (type === StartPageItemType.FAVORITE) {
-          Grid() {
-            ForEach(this.itemsFor(type), (item: StartPageItem) => {
-              GridItem() {
-                this.favoriteTile(item)
-              }
-            }, (item: StartPageItem) => item.id)
-          }
+      if (type === StartPageItemType.FAVORITE) {
+        Grid() {
+          ForEach(this.itemsFor(type), (item: StartPageItem) => {
+            GridItem() {
+              this.favoriteTile(item)
+            }
+          }, (item: StartPageItem) => item.id)
+        }
           .id('start-page-favorites-grid')
           .columnsTemplate('1fr 1fr 1fr')
           .columnsGap(12)
           .rowsGap(14)
           .width('100%')
-        } else {
-          Column({ space: 10 }) {
-            ForEach(this.itemsFor(type), (item: StartPageItem) => {
-              this.listCard(item)
-            }, (item: StartPageItem) => item.id)
-          }
-          .width('100%')
+      } else {
+        Column({ space: 10 }) {
+          ForEach(this.itemsFor(type), (item: StartPageItem) => {
+            this.listCard(item)
+          }, (item: StartPageItem) => item.id)
         }
+          .width('100%')
       }
+    }
       .id(`start-page-section-${type}`)
       .width('100%')
-    }
+      .padding({
+        left: this.startPageSurfaceInset(),
+        right: this.startPageSurfaceInset(),
+        top: this.startPageSurfaceInset(),
+        bottom: this.startPageSurfaceInset()
+      })
+      .backgroundColor(this.startPageSurfaceColor())
+      .borderRadius(HARMONY_RADIUS_CARD)
+      .clip(true)
+      .systemMaterial(this.shouldUseImmersiveSurface() && this.immersiveMaterialSupported
+        ? safariImmersiveMaterial()
+        : undefined)
   }
 
   build() {
@@ -212,17 +283,27 @@ export struct StartPage {
       this.pageBackground();
       Scroll() {
         Column({ space: 22 }) {
-          // Keep the editor affordance visible after a user enables a section;
-          // Safari's start-page editor remains reachable from the page header.
+          // The content comes first. The editor action is always the final
+          // start-page option so adding another section cannot place it above
+          // the bookmark tiles.
+          if (this.settings.showFavorites) {
+            this.section(StartPageItemType.FAVORITE)
+          }
+          if (shouldRenderStartPageSection(
+            StartPageItemType.FREQUENT,
+            this.settings.showFrequentSites,
+            this.itemsFor(StartPageItemType.FREQUENT).length
+          )) {
+            this.section(StartPageItemType.FREQUENT)
+          }
+
           Row() {
             this.editButton()
           }
-          .id('start-page-header')
+          .id('start-page-footer')
           .width('100%')
           .height(82)
           .justifyContent(FlexAlign.Center)
-
-          this.section(StartPageItemType.FAVORITE, this.settings.showFavorites)
         }
         .width('100%')
         .padding({ left: 18, right: 18, top: 16, bottom: 28 })
