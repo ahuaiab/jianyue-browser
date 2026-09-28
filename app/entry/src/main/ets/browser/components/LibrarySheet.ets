@@ -16,6 +16,7 @@ import {
   librarySectionAfterSwipe,
   librarySectionBackground,
   librarySectionChrome,
+  librarySectionIndicatorOffset,
   visibleHistoryRecords
 } from '../model/LibraryModels';
 import { BookmarkRecord, HistoryRecord } from '../model/BrowserTypes';
@@ -24,6 +25,7 @@ import fileUri from '@ohos.file.fileuri';
 import { curves } from '@kit.ArkUI';
 import {
   safariImmersiveMaterialIfSupported,
+  safariOpaqueModalSurfaceBackgroundColor,
   safariImmersiveSurfaceBackgroundColor
 } from '../model/BrowserMaterial';
 import {
@@ -74,6 +76,7 @@ export struct LibrarySheet {
   @Local sectionSwipeOffset: number = 0;
   @Local sectionTransitionProgress: number = 1;
   @Local sectionGestureActive: boolean = false;
+  @Local sectionTabsWidth: number = 0;
   @Local longPressEntryId: string = '';
   @Local menuEntryId: string = '';
   @Local suppressEntryClickId: string = '';
@@ -168,6 +171,18 @@ export struct LibrarySheet {
 
   private sectionTitle(section: LibrarySection): string {
     return librarySectionChrome(section).title;
+  }
+
+  private sectionIndicatorOffset(): number {
+    const segmentWidth: number = Math.max(0, (this.sectionTabsWidth - 4) / 2);
+    return librarySectionIndicatorOffset(this.section, segmentWidth);
+  }
+
+  private updateSectionTabsWidth(area: Area): void {
+    const width: number = Number(area.width);
+    if (Number.isFinite(width) && width > 0 && this.sectionTabsWidth !== width) {
+      this.sectionTabsWidth = width;
+    }
   }
 
   private selectSection(next: LibrarySection): void {
@@ -378,9 +393,7 @@ export struct LibrarySheet {
       .layoutWeight(1)
       .height(24)
       .padding(0)
-      .backgroundColor(this.section === section
-        ? librarySectionBackground(true)
-        : Color.Transparent)
+      .backgroundColor(Color.Transparent)
       .stateEffect(false)
       // The selected segment is inset by 2vp. A 12vp radius keeps its corner
       // arc center aligned with the outer 20vp floating surface (the native
@@ -891,18 +904,27 @@ export struct LibrarySheet {
         Blank()
           .width('100%')
           .height(this.topContentInset());
-        Row() {
-          this.sectionButton(LibrarySection.BOOKMARKS);
-          this.sectionButton(LibrarySection.HISTORY);
+        Stack({ alignContent: Alignment.TopStart }) {
+          Row()
+            .width('50%')
+            .height(24)
+            .backgroundColor(librarySectionBackground(true))
+            .borderRadius(HARMONY_RADIUS_CONTROL)
+            .translate({ x: this.sectionIndicatorOffset(), y: 0 });
+          Row() {
+            this.sectionButton(LibrarySection.BOOKMARKS);
+            this.sectionButton(LibrarySection.HISTORY);
+          }
+            .width('100%')
+            .height(24);
         }
           .id('library-section-tabs')
           .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
           .alignSelf(ItemAlign.Center)
           .height(30)
           .padding({ left: 2, right: 2, top: 2, bottom: 2 })
-          // No persistent track: an unselected segment is the sheet surface
-          // itself, while only the selected segment paints the gray pill.
-          .backgroundColor(Color.Transparent);
+          .backgroundColor(Color.Transparent)
+          .onAreaChange((_oldValue: Area, newValue: Area) => this.updateSectionTabsWidth(newValue));
 
         this.searchBar();
 
@@ -940,7 +962,7 @@ export struct LibrarySheet {
         // remains bottom-anchored and paints only its own rounded surface.
         .height(`${LIBRARY_SHEET_HEIGHT_PERCENT}%`)
         .padding({ left: 0, right: 0, top: 0, bottom: 0 })
-        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
+        .backgroundColor(safariOpaqueModalSurfaceBackgroundColor())
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
@@ -952,8 +974,7 @@ export struct LibrarySheet {
               .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
               .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
               .onActionCancel(() => this.cancelSheetSwipe())
-        )
-        .systemMaterial(safariImmersiveMaterialIfSupported());
+        );
       }
         .width('100%')
         .height('100%')

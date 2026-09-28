@@ -118,5 +118,17 @@ export default function webTabPoolTest() {
       expect(factory.handles.get('b')?.destroyCalls).assertEqual(0);
       expect(factory.handles.get('c')?.destroyCalls).assertEqual(0);
     });
+
+    it('keeps a blank start tab out of the web runtime pool', 0, () => {
+      const store = new TabStore(() => 5000, ['source']);
+      const blankId: TabId = store.createTab('about:blank', false);
+      const factory: FakeWebRuntimeFactory = new FakeWebRuntimeFactory();
+      const pool: WebTabPool = new WebTabPool(factory);
+
+      pool.ensureBalanced(store.tabs, blankId);
+
+      expect(pool.runtimeIds().join(',')).assertEqual('');
+      expect(factory.handles.get(blankId)).assertEqual(undefined);
+    });
   });
 }

@@ -47,8 +47,17 @@ export interface WebPageLifecycleObserver {
   onError(tabId: TabId, controller: webview.WebviewController, diagnostic: WebLoadError): void;
   onSslError(tabId: TabId, controller: webview.WebviewController, diagnostic: WebSslError): void;
   onRenderExited(tabId: TabId, controller: webview.WebviewController): boolean;
-  onWindowNew(tabId: TabId, controller: webview.WebviewController): boolean;
-  onFullScreenEnter(tabId: TabId, controller: webview.WebviewController): void;
+  onWindowNew(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string,
+    handler: ControllerHandler
+  ): boolean;
+  onFullScreenEnter(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    exitFullScreen: () => void
+  ): void;
   onFullScreenExit(tabId: TabId, controller: webview.WebviewController): void;
 }
 
@@ -83,8 +92,8 @@ class WebBuildData {
   readonly onError: (diagnostic: WebLoadError) => void;
   readonly onSslError: (diagnostic: WebSslError) => void;
   readonly onRenderExited: () => boolean;
-  readonly onWindowNew: () => boolean;
-  readonly onFullScreenEnter: () => void;
+  readonly onWindowNew: (targetUrl: string, handler: ControllerHandler) => boolean;
+  readonly onFullScreenEnter: (exitFullScreen: () => void) => void;
   readonly onFullScreenExit: () => void;
   readonly downloadDelegate: webview.WebDownloadDelegate | undefined;
   readonly permissionHandler: WebPermissionRequestHandler | undefined;
@@ -99,8 +108,9 @@ class WebBuildData {
     onError: (diagnostic: WebLoadError) => void = (_diagnostic: WebLoadError) => undefined,
     onSslError: (diagnostic: WebSslError) => void = (_diagnostic: WebSslError) => undefined,
     onRenderExited: () => boolean = () => false,
-    onWindowNew: () => boolean = () => false,
-    onFullScreenEnter: () => void = () => undefined,
+    onWindowNew: (targetUrl: string, handler: ControllerHandler) => boolean =
+      (_targetUrl: string, _handler: ControllerHandler) => false,
+    onFullScreenEnter: (exitFullScreen: () => void) => void = (_exitFullScreen: () => void) => undefined,
     onFullScreenExit: () => void = () => undefined,
     downloadDelegate: webview.WebDownloadDelegate | undefined = undefined,
     onPageBegin: (url: string) => void = (_url: string) => undefined,
@@ -201,95 +211,103 @@ class ArkWebGeolocationEventAdapter implements WebGeolocationEventPort {
 
 @Builder
 function buildWebNode(data: WebBuildData) {
-  Web({
-    src: data.url,
-    controller: data.controller,
-    incognitoMode: data.isPrivate
-  })
-    .width('100%')
-    .height('100%')
-    .javaScriptAccess(true)
-    .domStorageAccess(true)
-    .multiWindowAccess(true)
-    .geolocationAccess(true)
-    .onLoadIntercept((event) => {
-      const request = event?.data;
-      if (request === undefined) {
+  Stack({ alignContent: Alignment.TopStart }) {
+    Web({
+      src: data.url,
+      controller: data.controller,
+      incognitoMode: data.isPrivate
+    })
+      .width('100%')
+      .height('100%')
+      .javaScriptAccess(true)
+      .domStorageAccess(true)
+      .multiWindowAccess(true)
+      .allowWindowOpenMethod(true)
+      .geolocationAccess(true)
+      .enableNativeMediaPlayer({ enable: false, shouldOverlay: false })
+      .onLoadIntercept((event) => {
+        const request = event?.data;
+        if (request === undefined) {
+          return false;
+        }
+        return data.onExternalNavigation(request.getRequestUrl());
+      })
+      .onPageBegin((event) => {
+        data.onPageBegin(event?.url ?? '');
+      })
+      .onRefreshAccessedHistory((event) => {
+        data.onPageBegin(event?.url ?? '');
+      })
+      .onPageEnd(() => {
+        data.installDownloadDelegate();
+        data.onPageEnd();
+      })
+      .onScroll((event) => data.onScroll(event?.yOffset ?? 0))
+      .onTitleReceive((event) => data.onTitleReceive(event?.title ?? ''))
+      .onFaviconReceived((event) => {
+        if (event?.favicon !== undefined) {
+          data.onFaviconReceived(event.favicon);
+        }
+      })
+      .onErrorReceive((event) => {
+        const request = event?.request;
+        const error = event?.error;
+        data.onError({
+          code: error?.getErrorCode() ?? 0,
+          info: error?.getErrorInfo() ?? '',
+          url: request?.getRequestUrl() ?? data.url,
+          isMainFrame: request?.isMainFrame() ?? true
+        });
         return false;
-      }
-      return data.onExternalNavigation(request.getRequestUrl());
-    })
-    .onPageBegin((event) => data.onPageBegin(event?.url ?? ''))
-    .onRefreshAccessedHistory((event) => data.onPageBegin(event?.url ?? ''))
-    .onPageEnd(() => {
-      data.installDownloadDelegate();
-      data.onPageEnd();
-    })
-    .onScroll((event) => data.onScroll(event?.yOffset ?? 0))
-    .onTitleReceive((event) => data.onTitleReceive(event?.title ?? ''))
-    .onFaviconReceived((event) => {
-      if (event?.favicon !== undefined) {
-        data.onFaviconReceived(event.favicon);
-      }
-    })
-    .onErrorReceive((event) => {
-      const request = event?.request;
-      const error = event?.error;
-      data.onError({
-        code: error?.getErrorCode() ?? 0,
-        info: error?.getErrorInfo() ?? '',
-        url: request?.getRequestUrl() ?? data.url,
-        isMainFrame: request?.isMainFrame() ?? true
+      })
+      .onSslErrorEvent((event) => data.onSslError({
+        code: Number(event?.error ?? 0),
+        url: event?.url ?? data.url,
+        isMainFrame: event?.isMainFrame ?? true,
+        isFatal: event?.isFatalError ?? true
+      }))
+      .onRenderExited(() => data.onRenderExited())
+      .onWindowNewExt((event) => data.onWindowNew(event.targetUrl, event.handler))
+      .onFullScreenEnter((event) => data.onFullScreenEnter(() => event.handler.exitFullScreen()))
+      .onFullScreenExit(() => data.onFullScreenExit())
+      .onPermissionRequest((event) => {
+        const nativeRequest = event?.request;
+        if (nativeRequest === undefined) {
+          return;
+        }
+        if (data.permissionHandler === undefined) {
+          nativeRequest.deny();
+          return;
+        }
+        const request: WebPermissionRequestPort = new ArkWebPermissionRequestAdapter(
+          () => nativeRequest.getOrigin(),
+          () => nativeRequest.getAccessibleResource(),
+          (resources: Array<string>) => nativeRequest.grant(resources),
+          () => nativeRequest.deny()
+        );
+        data.permissionHandler.onPermissionRequest(request, data.isPrivate);
+      })
+      .onGeolocationShow((event) => {
+        if (data.permissionHandler === undefined) {
+          event.geolocation.invoke(event.origin, false, false);
+          return;
+        }
+        const geolocationEvent: WebGeolocationEventPort = new ArkWebGeolocationEventAdapter(
+          event.origin,
+          (origin: string, allow: boolean, retain: boolean) =>
+            event.geolocation.invoke(origin, allow, retain)
+        );
+        data.permissionHandler.onGeolocationShow(geolocationEvent, data.isPrivate);
+      })
+      // Diagnostic-only observer. It does not consume or forward events.
+      .onClick(() => {
+        hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+          'phase=webview-click touchOwner=page webViewTouchDown=0 webViewClick=1 ' +
+            'buttonClick=0 touchCancel=0');
       });
-      return false;
-    })
-    .onSslErrorEvent((event) => data.onSslError({
-      code: Number(event?.error ?? 0),
-      url: event?.url ?? data.url,
-      isMainFrame: event?.isMainFrame ?? true,
-      isFatal: event?.isFatalError ?? true
-    }))
-    .onRenderExited(() => data.onRenderExited())
-    .onWindowNewExt(() => data.onWindowNew())
-    .onFullScreenEnter(() => data.onFullScreenEnter())
-    .onFullScreenExit(() => data.onFullScreenExit())
-    .onPermissionRequest((event) => {
-      const nativeRequest = event?.request;
-      if (nativeRequest === undefined) {
-        return;
-      }
-      if (data.permissionHandler === undefined) {
-        nativeRequest.deny();
-        return;
-      }
-      const request: WebPermissionRequestPort = new ArkWebPermissionRequestAdapter(
-        () => nativeRequest.getOrigin(),
-        () => nativeRequest.getAccessibleResource(),
-        (resources: Array<string>) => nativeRequest.grant(resources),
-        () => nativeRequest.deny()
-      );
-      data.permissionHandler.onPermissionRequest(request, data.isPrivate);
-    })
-    .onGeolocationShow((event) => {
-      if (data.permissionHandler === undefined) {
-        event.geolocation.invoke(event.origin, false, false);
-        return;
-      }
-      const geolocationEvent: WebGeolocationEventPort = new ArkWebGeolocationEventAdapter(
-        event.origin,
-        (origin: string, allow: boolean, retain: boolean) =>
-          event.geolocation.invoke(origin, allow, retain)
-      );
-      data.permissionHandler.onGeolocationShow(geolocationEvent, data.isPrivate);
-    })
-    // Diagnostic-only observer. It does not consume or forward events. The
-    // exact TabBar capsule records webViewClick=0 when its Block hierarchy
-    // owns the stream; the WebView itself has no root-level onTouch handler.
-    .onClick(() => {
-      hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
-        'phase=webview-click touchOwner=page webViewTouchDown=0 webViewClick=1 ' +
-          'buttonClick=0 touchCancel=0');
-    });
+  }
+  .width('100%')
+  .height('100%');
 }
 
 export class WebNodeHostController extends NodeController {
@@ -436,11 +454,12 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     const onRenderExited: () => boolean = () => {
       return this.observer?.onRenderExited(tab.id, controller) ?? false;
     };
-    const onWindowNew: () => boolean = () => {
-      return this.observer?.onWindowNew(tab.id, controller) ?? false;
+    const onWindowNew: (targetUrl: string, handler: ControllerHandler) => boolean =
+      (targetUrl: string, handler: ControllerHandler) => {
+        return this.observer?.onWindowNew(tab.id, controller, targetUrl, handler) ?? false;
     };
-    const onFullScreenEnter: () => void = () => {
-      this.observer?.onFullScreenEnter(tab.id, controller);
+    const onFullScreenEnter: (exitFullScreen: () => void) => void = (exitFullScreen: () => void) => {
+      this.observer?.onFullScreenEnter(tab.id, controller, exitFullScreen);
     };
     const onFullScreenExit: () => void = () => {
       this.observer?.onFullScreenExit(tab.id, controller);
@@ -448,7 +467,8 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     const downloadDelegate: webview.WebDownloadDelegate | undefined = this.createDownloadDelegate(tab.id, tab.isPrivate);
     builderNode.build(
       wrapBuilder<[WebBuildData]>(buildWebNode),
-      new WebBuildData(sourceUrl, controller, tab.isPrivate, onPageEnd, onTitleReceive, onError, onSslError,
+      new WebBuildData(sourceUrl, controller, tab.isPrivate,
+        onPageEnd, onTitleReceive, onError, onSslError,
         onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin,
         this.permissionHandler, onScroll, onFaviconReceived, onExternalNavigation)
     );

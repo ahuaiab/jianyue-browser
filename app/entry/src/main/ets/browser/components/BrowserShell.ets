@@ -47,6 +47,7 @@ import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
 import { KeyValueStore, MemoryKeyValueStore, PreferencesKeyValueStore } from '../data/KeyValueStore';
 import { BrowserLifecyclePort, BrowserLifecycleRegistry } from '../lifecycle/BrowserLifecyclePort';
 import { DownloadProgressSnapshot, DownloadStatus, DownloadTaskRecord } from '../model/DownloadModels';
+import { consumeFullScreenBackPress } from '../model/FullScreenBackAction';
 import { desktopUserAgentFor, PageAction } from '../model/PageActions';
 import {
   historyDeleteCutoff,
@@ -516,8 +517,17 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
   private readonly errorCallback: (tabId: TabId, controller: webview.WebviewController, diagnostic: WebLoadError) => void;
   private readonly sslErrorCallback: (tabId: TabId, controller: webview.WebviewController, diagnostic: WebSslError) => void;
   private readonly renderExitCallback: (tabId: TabId, controller: webview.WebviewController) => boolean;
-  private readonly windowNewCallback: (tabId: TabId, controller: webview.WebviewController) => boolean;
-  private readonly fullScreenEnterCallback: (tabId: TabId, controller: webview.WebviewController) => void;
+  private readonly windowNewCallback: (
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string,
+    handler: ControllerHandler
+  ) => boolean;
+  private readonly fullScreenEnterCallback: (
+    tabId: TabId,
+    controller: webview.WebviewController,
+    exitFullScreen: () => void
+  ) => void;
   private readonly fullScreenExitCallback: (tabId: TabId, controller: webview.WebviewController) => void;
   private readonly downloadStartCallback: (tabId: TabId, fileName: string) => void;
   private readonly downloadFinishCallback: (tabId: TabId, filePath: string) => void;
@@ -531,12 +541,21 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
       (_tabId: TabId, _controller: webview.WebviewController, _diagnostic: WebSslError) => undefined,
     renderExitCallback: (tabId: TabId, controller: webview.WebviewController) => boolean =
       (_tabId: TabId, _controller: webview.WebviewController) => false,
-    windowNewCallback: (tabId: TabId, controller: webview.WebviewController) => boolean =
-      (_tabId: TabId, _controller: webview.WebviewController) => false,
+    windowNewCallback: (
+      tabId: TabId,
+      controller: webview.WebviewController,
+      targetUrl: string,
+      handler: ControllerHandler
+    ) => boolean =
+      (_tabId: TabId, _controller: webview.WebviewController, _targetUrl: string,
+        _handler: ControllerHandler) => false,
     titleCallback: (tabId: TabId, controller: webview.WebviewController, title: string) => void =
       (_tabId: TabId, _controller: webview.WebviewController, _title: string) => undefined,
-    fullScreenEnterCallback: (tabId: TabId, controller: webview.WebviewController) => void =
-      (_tabId: TabId, _controller: webview.WebviewController) => undefined,
+    fullScreenEnterCallback: (
+      tabId: TabId,
+      controller: webview.WebviewController,
+      exitFullScreen: () => void
+    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _exitFullScreen: () => void) => undefined,
     fullScreenExitCallback: (tabId: TabId, controller: webview.WebviewController) => void =
       (_tabId: TabId, _controller: webview.WebviewController) => undefined,
     downloadStartCallback: (tabId: TabId, fileName: string) => void =
@@ -608,12 +627,17 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
     return this.renderExitCallback(tabId, controller);
   }
 
-  onWindowNew(tabId: TabId, controller: webview.WebviewController): boolean {
-    return this.windowNewCallback(tabId, controller);
+  onWindowNew(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string,
+    handler: ControllerHandler
+  ): boolean {
+    return this.windowNewCallback(tabId, controller, targetUrl, handler);
   }
 
-  onFullScreenEnter(tabId: TabId, controller: webview.WebviewController): void {
-    this.fullScreenEnterCallback(tabId, controller);
+  onFullScreenEnter(tabId: TabId, controller: webview.WebviewController, exitFullScreen: () => void): void {
+    this.fullScreenEnterCallback(tabId, controller, exitFullScreen);
   }
 
   onFullScreenExit(tabId: TabId, controller: webview.WebviewController): void {
@@ -825,6 +849,8 @@ export struct BrowserShell {
     fontSize: PageFontSize.STANDARD,
     fullScreen: false
   };
+  private fullScreenExitTabId: TabId = '';
+  private fullScreenExitAction: (() => void) | undefined = undefined;
   @Local pageReady: boolean = false;
   @Local showLibrary: boolean = false;
   @Local showStartPageCustomize: boolean = false;
@@ -1084,7 +1110,8 @@ export struct BrowserShell {
         this.showBrowserError(tabId, BrowserErrorKind.RENDERER_EXITED, 0, this.urlForTab(tabId));
         return true;
       },
-      (_tabId: TabId, _controller: webview.WebviewController) => false,
+      (tabId: TabId, controller: webview.WebviewController, targetUrl: string, handler: ControllerHandler) =>
+        this.handleWindowNew(tabId, controller, targetUrl, handler),
       (tabId: TabId, _controller: webview.WebviewController, title: string) => {
         const normalizedTitle: string = title.trim();
         if (normalizedTitle.length === 0) {
@@ -1126,7 +1153,8 @@ export struct BrowserShell {
           void this.saveSession();
         }
       },
-      (tabId: TabId, _controller: webview.WebviewController) => this.setFullScreen(tabId, true),
+      (tabId: TabId, _controller: webview.WebviewController, exitFullScreen: () => void) =>
+        this.setFullScreen(tabId, true, exitFullScreen),
       (tabId: TabId, _controller: webview.WebviewController) => this.setFullScreen(tabId, false),
       (tabId: TabId, fileName: string) => {
         void tabId;
@@ -2219,9 +2247,21 @@ export struct BrowserShell {
     }, 0);
   }
 
-  private setFullScreen(tabId: TabId, enabled: boolean): void {
+  private setFullScreen(
+    tabId: TabId,
+    enabled: boolean,
+    exitFullScreen: (() => void) | undefined = undefined
+  ): void {
+    if (!enabled && this.fullScreenExitTabId === tabId) {
+      this.fullScreenExitTabId = '';
+      this.fullScreenExitAction = undefined;
+    }
     if (tabId !== this.tabStore.activeTabId) {
       return;
+    }
+    if (enabled) {
+      this.fullScreenExitTabId = tabId;
+      this.fullScreenExitAction = exitFullScreen;
     }
     this.resetBottomChromeScroll(tabId);
     this.pageDisplayState = {
@@ -3220,6 +3260,28 @@ export struct BrowserShell {
   }
 
   /**
+   * ArkWeb reports target=_blank/window.open through this callback. The
+   * browser presents a single-page tab model, so consume the child request,
+   * release its handler, and navigate the source controller in place.
+   */
+  private handleWindowNew(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string,
+    handler: ControllerHandler
+  ): boolean {
+    handler.setWebController(null);
+    const sourceTab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+      (tab: BrowserTabRecord) => tab.id === tabId
+    );
+    if (sourceTab === undefined || this.tabStore.activeTabId !== tabId) {
+      return false;
+    }
+    this.loadAddress(targetUrl, 'web-window-open', 'BrowserShell.handleWindowNew');
+    return true;
+  }
+
+  /**
    * Commit Safari's end-of-strip action: a left swipe on the last tab opens
    * and activates a normal blank start tab instead of rubber-banding forever.
    */
@@ -4203,6 +4265,11 @@ export struct BrowserShell {
       this.showDownloadManager ? 'true' : 'false',
       this.canNavigateBack ? 'true' : 'false'
     );
+    const exitFullScreen: (() => void) | undefined =
+      this.fullScreenExitTabId === this.tabStore.activeTabId ? this.fullScreenExitAction : undefined;
+    if (consumeFullScreenBackPress(this.pageDisplayState.fullScreen, exitFullScreen)) {
+      return true;
+    }
     if (this.showDownloadManager) {
       this.closeDownloadManager();
       return true;

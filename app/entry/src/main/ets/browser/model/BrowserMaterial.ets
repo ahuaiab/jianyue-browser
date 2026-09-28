@@ -1,5 +1,8 @@
 import { uiMaterial } from '@kit.ArkUI';
-import { safariChromeSurfaceBackgroundColor } from './BrowserVisualMetrics';
+import {
+  SAFARI_BOTTOM_CHROME_MATERIAL_COLOR,
+  safariChromeSurfaceBackgroundColor
+} from './BrowserVisualMetrics';
 
 /**
  * One native material preset for every browser-owned floating surface.
@@ -42,4 +45,9 @@ export function safariImmersiveControlMaterialIfSupported(): uiMaterial.Immersiv
 /** Pair the native filter with the translucent base or the opaque fallback. */
 export function safariImmersiveSurfaceBackgroundColor(): string {
   return safariChromeSurfaceBackgroundColor(safariImmersiveMaterialSupported());
+}
+
+/** Modal sheets must hide the browser chrome underneath instead of blending with it. */
+export function safariOpaqueModalSurfaceBackgroundColor(): string {
+  return SAFARI_BOTTOM_CHROME_MATERIAL_COLOR;
 }

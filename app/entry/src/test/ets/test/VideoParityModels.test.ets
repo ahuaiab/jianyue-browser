@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { Context } from '@kit.AbilityKit';
+import { consumeFullScreenBackPress } from '../../../main/ets/browser/model/FullScreenBackAction';
 import {
   availableBrowserSearchEngines,
   BrowserSearchEngine,
@@ -106,6 +107,7 @@ import {
   librarySectionAfterSwipe,
   librarySectionBackground,
   librarySectionChrome,
+  librarySectionIndicatorOffset,
   visibleHistoryRecords
 } from '../../../main/ets/browser/model/LibraryModels';
 import {
@@ -166,7 +168,8 @@ import {
   SAFARI_IMMERSIVE_MATERIAL_STYLE,
   SAFARI_IMMERSIVE_MATERIAL_TINT,
   safariImmersiveControlMaterialIfSupported,
-  safariImmersiveMaterialSupported
+  safariImmersiveMaterialSupported,
+  safariOpaqueModalSurfaceBackgroundColor
 } from '../../../main/ets/browser/model/BrowserMaterial';
 import { uiMaterial } from '@kit.ArkUI';
 import {
@@ -687,10 +690,16 @@ export default function videoParityModelsTest() {
     });
 
     it('uses a gray selected library segment without a separate track', 0, () => {
-      expect(LIBRARY_SECTION_SELECTED_BACKGROUND).assertEqual('#F2F2F7');
+      expect(LIBRARY_SECTION_SELECTED_BACKGROUND).assertEqual('#D1D1D6');
       expect(LIBRARY_SECTION_UNSELECTED_BACKGROUND).assertEqual('#FFFFFF');
       expect(librarySectionBackground(true)).assertEqual(LIBRARY_SECTION_SELECTED_BACKGROUND);
       expect(librarySectionBackground(false)).assertEqual(LIBRARY_SECTION_UNSELECTED_BACKGROUND);
+    });
+
+    it('moves one library selection indicator instead of crossfading two segment surfaces', 0, () => {
+      expect(librarySectionIndicatorOffset(LibrarySection.BOOKMARKS, 120)).assertEqual(0);
+      expect(librarySectionIndicatorOffset(LibrarySection.HISTORY, 120)).assertEqual(120);
+      expect(librarySectionIndicatorOffset(LibrarySection.HISTORY, -20)).assertEqual(0);
     });
 
     it('applies interruptible resistance before dismissing the library sheet', 0, () => {
@@ -1001,6 +1010,12 @@ export default function videoParityModelsTest() {
       expect(SAFARI_IMMERSIVE_MATERIAL_LIGHT_EFFECT_COLOR).assertUndefined();
     });
 
+    it('keeps the library modal surface opaque over the bottom browser chrome', 0, () => {
+      const surfaceColor: string = safariOpaqueModalSurfaceBackgroundColor();
+      expect(surfaceColor).assertEqual(SAFARI_BOTTOM_CHROME_MATERIAL_COLOR);
+      expect(surfaceColor.substring(0, 3)).assertEqual('#FF');
+    });
+
     it('provides the shared native material for start-page action controls', 0, () => {
       const material: uiMaterial.ImmersiveMaterial | undefined =
         safariImmersiveControlMaterialIfSupported();
@@ -1186,6 +1201,26 @@ export default function videoParityModelsTest() {
       expect(BrowserLifecycleRegistry.onBackPress()).assertTrue();
       BrowserLifecycleRegistry.clear(port);
       expect(BrowserLifecycleRegistry.onBackPress()).assertFalse();
+    });
+
+    it('consumes system back to exit video fullscreen before page navigation', 0, () => {
+      let exitCount: number = 0;
+      const consumed: boolean = consumeFullScreenBackPress(true, () => {
+        exitCount += 1;
+      });
+
+      expect(consumed).assertTrue();
+      expect(exitCount).assertEqual(1);
+    });
+
+    it('does not consume system back or invoke fullscreen exit while inline', 0, () => {
+      let exitCount: number = 0;
+      const consumed: boolean = consumeFullScreenBackPress(false, () => {
+        exitCount += 1;
+      });
+
+      expect(consumed).assertFalse();
+      expect(exitCount).assertEqual(0);
     });
 
     it('forwards ability destruction to the active browser shell', 0, async () => {

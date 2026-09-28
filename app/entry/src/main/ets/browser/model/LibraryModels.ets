@@ -15,11 +15,22 @@ export const LIBRARY_SECTION_SWIPE_THRESHOLD: number = 48;
  * white, the selected segment gets a light gray native-material surface, and
  * the unselected segment remains the same color as the sheet.
  */
-export const LIBRARY_SECTION_SELECTED_BACKGROUND: string = '#F2F2F7';
+export const LIBRARY_SECTION_SELECTED_BACKGROUND: string = '#D1D1D6';
 export const LIBRARY_SECTION_UNSELECTED_BACKGROUND: string = '#FFFFFF';
 
 export function librarySectionBackground(selected: boolean): string {
   return selected ? LIBRARY_SECTION_SELECTED_BACKGROUND : LIBRARY_SECTION_UNSELECTED_BACKGROUND;
+}
+
+/** Place one shared selection indicator at the active section's segment. */
+export function librarySectionIndicatorOffset(
+  section: LibrarySection,
+  segmentWidth: number
+): number {
+  if (section !== LibrarySection.HISTORY || !Number.isFinite(segmentWidth)) {
+    return 0;
+  }
+  return Math.max(0, segmentWidth);
 }
 
 /** Downward drag distance, in vp, required to dismiss the library sheet. */
