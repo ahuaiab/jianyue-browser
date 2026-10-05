@@ -14,6 +14,9 @@ import {
 } from '../model/BrowserSettings';
 import { searchEngineLabel } from '../model/BrowserTypes';
 import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP,
   BrowserChromeAnchor,
   browserChromeSurfaceFrame,
   browserChromeSurfaceHorizontalOffset,
@@ -227,7 +230,9 @@ export struct StartPageCustomizeSheet {
     Row({ space: 12 }) {
       SymbolGlyph(icon)
         .id(`${id}-icon`)
-        .fontSize(22)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor(['#1D1D1F']);
       Text(title)
         .fontSize(16)
@@ -251,7 +256,9 @@ export struct StartPageCustomizeSheet {
     Column() {
       Row({ space: 12 }) {
         SymbolGlyph($r('sys.symbol.magnifyingglass'))
-          .fontSize(22)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#1D1D1F']);
         Text('搜索引擎')
           .fontSize(16)
@@ -259,14 +266,16 @@ export struct StartPageCustomizeSheet {
           .layoutWeight(1);
         Button(this.selectedSearchEngineLabel(), { type: ButtonType.Normal, stateEffect: false })
           .id('start-page-search-engine-value')
-          .fontSize(14)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor('#007AFF')
           .backgroundColor(Color.Transparent)
           .padding({ left: 8, right: 0 })
           .stateEffect(false)
           .onClick(() => this.engineExpanded = !this.engineExpanded);
         SymbolGlyph(this.engineExpanded ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-          .fontSize(15)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#8E8E93']);
       }
         .id('start-page-search-engine-row')
@@ -280,12 +289,14 @@ export struct StartPageCustomizeSheet {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Row() {
                 Text(searchEngineLabel(engine, this.settings.customSearchEngine))
-                  .fontSize(15)
+                  .fontSize(BROWSER_UI_TEXT_SIZE_VP)
                   .fontColor('#1D1D1F')
                   .layoutWeight(1);
                 if (this.settings.searchEngine === engine) {
                   SymbolGlyph($r('sys.symbol.checkmark'))
-                    .fontSize(18)
+                    .fontSize(BROWSER_UI_ICON_SIZE_VP)
+                    .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+                    .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
                     .fontColor(['#007AFF']);
                 }
               }
@@ -313,11 +324,13 @@ export struct StartPageCustomizeSheet {
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           Row() {
             Text('编辑')
-              .fontSize(15)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor('#007AFF')
               .layoutWeight(1);
             SymbolGlyph($r('sys.symbol.pencil_line'))
-              .fontSize(18)
+              .fontSize(BROWSER_UI_ICON_SIZE_VP)
+              .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
               .fontColor(['#007AFF']);
           }
             .width('100%')
@@ -349,7 +362,9 @@ export struct StartPageCustomizeSheet {
       Row() {
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(18)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
             .fontColor(['#6B6B72']);
         }
           .id('custom-search-engine-cancel')
@@ -360,14 +375,14 @@ export struct StartPageCustomizeSheet {
           .stateEffect(false)
           .onClick(() => this.closeCustomEngineEditor());
         Text('编辑搜索引擎')
-          .fontSize(15)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontWeight(FontWeight.Bold)
           .fontColor('#1D1D1F')
           .layoutWeight(1)
           .textAlign(TextAlign.Center);
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           Text('保存')
-            .fontSize(15)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#007AFF');
         }
           .id('custom-search-engine-save')
@@ -386,7 +401,7 @@ export struct StartPageCustomizeSheet {
       Scroll() {
         Column({ space: 12 }) {
           Text('自定义搜索引擎')
-            .fontSize(13)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#6B6B72')
             .width('100%');
           TextInput({
@@ -397,14 +412,14 @@ export struct StartPageCustomizeSheet {
             .width('100%')
             .height(52)
             .padding({ left: 16, right: 16 })
-            .fontSize(16)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#1D1D1F')
             .placeholderColor('#8E8E93')
             .backgroundColor('#F2F2F7')
             .borderRadius(HARMONY_RADIUS_CARD)
             .onChange((value: string) => this.customEngineNameDraft = value);
           Text('搜索 URL 模板')
-            .fontSize(13)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#6B6B72')
             .width('100%');
           TextInput({
@@ -415,27 +430,27 @@ export struct StartPageCustomizeSheet {
             .width('100%')
             .height(52)
             .padding({ left: 16, right: 16 })
-            .fontSize(14)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#1D1D1F')
             .placeholderColor('#8E8E93')
             .backgroundColor('#F2F2F7')
             .borderRadius(HARMONY_RADIUS_CARD)
             .onChange((value: string) => this.customEngineUrlDraft = value);
           Text('使用 %s 代表搜索关键词，地址必须以 HTTP 或 HTTPS 开头。')
-            .fontSize(12)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#8E8E93')
             .width('100%');
           if (this.customEngineError.length > 0) {
             Text(this.customEngineError)
               .id('custom-search-engine-error')
-              .fontSize(12)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor('#FF3B30')
               .width('100%');
           }
           if (this.settings.customSearchEngine !== undefined) {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Text('删除自定义搜索引擎')
-                .fontSize(15)
+                .fontSize(BROWSER_UI_TEXT_SIZE_VP)
                 .fontColor('#FF3B30');
             }
               .id('custom-search-engine-delete')
@@ -468,17 +483,21 @@ export struct StartPageCustomizeSheet {
   private backgroundRow() {
     Row({ space: 12 }) {
       SymbolGlyph($r('sys.symbol.circle_lefthalf_inset_filled'))
-        .fontSize(22)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor(['#1D1D1F']);
       Text('初始页背景')
-        .fontSize(16)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#1D1D1F')
         .layoutWeight(1);
       Text(this.startPageBackgroundLabel())
-        .fontSize(14)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#007AFF');
       SymbolGlyph($r('sys.symbol.chevron_down'))
-        .fontSize(15)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor(['#8E8E93']);
     }
       .id('start-page-background-row')
@@ -506,7 +525,7 @@ export struct StartPageCustomizeSheet {
         .height(this.safeTopInset());
         Row() {
           Text('自定义起始页')
-            .fontSize(15)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontWeight(FontWeight.Bold)
             .fontColor('#1D1D1F')
             .layoutWeight(1)

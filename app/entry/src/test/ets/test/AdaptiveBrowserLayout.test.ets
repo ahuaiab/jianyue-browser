@@ -4,39 +4,48 @@ import {
   BrowserChromeHandedness,
   BrowserChromeOperatingHand,
   BrowserChromeLayoutFrame,
+  LibraryTabInnerJoinFrame,
   browserChromeLayoutFrame,
   browserChromeSurfaceFrame,
   browserChromeSurfaceHorizontalOffset,
+  libraryTabInnerJoinFrame,
   browserChromeAnchorForHandedness,
   browserChromeAnchorForOperatingHand,
   browserChromeFloatingControlOffset,
-  SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP
+  SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP,
+  safariBottomChromeActionSlotWidth,
+  libraryContentCardWidth,
+  libraryListWidth
 } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 import {
   TabOverviewChromeFrame,
   TabOverviewPageFrame,
   tabOverviewChromeFrame,
-  tabOverviewPageFrame
+  tabOverviewPageFrame,
+  tabOverviewCardWidth,
+  tabOverviewGridWidth,
+  tabOverviewGridLeft
 } from '../../../main/ets/browser/model/TabOverviewActions';
 
 export default function adaptiveBrowserLayoutTest() {
   describe('AdaptiveBrowserLayout', () => {
     it('keeps the portrait chrome width after rotating to landscape', 0, () => {
-      const portrait: BrowserChromeLayoutFrame = browserChromeLayoutFrame(400, 0, 0);
+      const portrait: BrowserChromeLayoutFrame = browserChromeLayoutFrame(366, 0, 0);
       const landscape: BrowserChromeLayoutFrame = browserChromeLayoutFrame(800, 0, 0);
 
-      expect(SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP).assertEqual(400);
-      expect(portrait.width).assertEqual(400);
+      expect(SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP).assertEqual(366);
+      expect(portrait.width).assertEqual(366);
       expect(portrait.left).assertEqual(0);
-      expect(landscape.width).assertEqual(400);
-      expect(landscape.left).assertEqual(200);
+      expect(landscape.width).assertEqual(366);
+      expect(landscape.left).assertEqual(217);
     });
 
-    it('centers the fixed chrome inside asymmetric side avoid areas', 0, () => {
+    it('centers the fixed chrome on the window while respecting side avoid areas', 0, () => {
       const frame: BrowserChromeLayoutFrame = browserChromeLayoutFrame(800, 24, 36);
 
-      expect(frame.width).assertEqual(400);
-      expect(frame.left).assertEqual(194);
+      expect(frame.width).assertEqual(366);
+      expect(frame.left).assertEqual(217);
+      expect(frame.left + frame.width / 2).assertEqual(400);
     });
 
     it('places the fixed chrome at the requested start and end anchors', 0, () => {
@@ -46,7 +55,7 @@ export default function adaptiveBrowserLayoutTest() {
         800, 24, 36, BrowserChromeAnchor.END);
 
       expect(start.left).assertEqual(24);
-      expect(end.left).assertEqual(364);
+      expect(end.left).assertEqual(398);
     });
 
     it('maps system handedness to a reachable chrome anchor', 0, () => {
@@ -77,9 +86,27 @@ export default function adaptiveBrowserLayoutTest() {
       const rightOffset: number = browserChromeFloatingControlOffset(
         800, 24, 36, 108, BrowserChromeAnchor.END);
 
-      expect(leftOffset).assertEqual(-300);
+      expect(leftOffset).assertEqual(-306);
       expect(centerOffset).assertEqual(0);
-      expect(rightOffset).assertEqual(300);
+      expect(rightOffset).assertEqual(294);
+    });
+
+    it('clamps a centered frame only when an avoid area crosses the fixed footprint', 0, () => {
+      const leftObstructed: BrowserChromeLayoutFrame = browserChromeLayoutFrame(800, 240, 0);
+      const rightObstructed: BrowserChromeLayoutFrame = browserChromeLayoutFrame(800, 0, 240);
+      expect(leftObstructed.width).assertEqual(366);
+      expect(leftObstructed.left).assertEqual(240);
+      expect(rightObstructed.left).assertEqual(194);
+      expect(browserChromeSurfaceHorizontalOffset(800, 24, 36, BrowserChromeAnchor.CENTER))
+        .assertEqual(0);
+    });
+
+    it('centers floating controls on the window and clamps crowded safe regions', 0, () => {
+      expect(browserChromeFloatingControlOffset(800, 24, 36, 108, BrowserChromeAnchor.CENTER))
+        .assertEqual(0);
+      const offset: number = browserChromeFloatingControlOffset(
+        300, 180, 12, 108, BrowserChromeAnchor.CENTER);
+      expect((300 - 108) / 2 + offset).assertEqual(180);
     });
 
     it('shrinks only when the safe width is narrower than the design width', 0, () => {
@@ -87,6 +114,18 @@ export default function adaptiveBrowserLayoutTest() {
 
       expect(frame.width).assertEqual(328);
       expect(frame.left).assertEqual(16);
+    });
+
+    it('anchors the selected tab to the shared content contour', 0, () => {
+      const bookmarks: LibraryTabInnerJoinFrame = libraryTabInnerJoinFrame(326, true, 12);
+      const history: LibraryTabInnerJoinFrame = libraryTabInnerJoinFrame(326, false, 12);
+
+      expect(bookmarks.offsetX).assertEqual(24);
+      expect(bookmarks.radius).assertEqual(12);
+      expect(bookmarks.opensRight).assertEqual(false);
+      expect(history.offsetX).assertEqual(163);
+      expect(history.radius).assertEqual(12);
+      expect(history.opensRight).assertEqual(true);
     });
 
     it('matches sheet width and handedness to the visible bottom chrome', 0, () => {
@@ -99,29 +138,76 @@ export default function adaptiveBrowserLayoutTest() {
       const narrow: BrowserChromeLayoutFrame = browserChromeSurfaceFrame(
         360, 16, 16, BrowserChromeAnchor.CENTER);
 
-      expect(center.width).assertEqual(384);
-      expect(center.left).assertEqual(202);
-      expect(start.width).assertEqual(384);
+      expect(center.width).assertEqual(350);
+      expect(center.left).assertEqual(225);
+      expect(start.width).assertEqual(350);
       expect(start.left).assertEqual(32);
-      expect(end.width).assertEqual(384);
-      expect(end.left).assertEqual(372);
+      expect(end.width).assertEqual(350);
+      expect(end.left).assertEqual(406);
       expect(narrow.width).assertEqual(312);
       expect(narrow.left).assertEqual(24);
       expect(browserChromeSurfaceHorizontalOffset(800, 24, 36, BrowserChromeAnchor.START))
-        .assertEqual(-176);
+        .assertEqual(-193);
       expect(browserChromeSurfaceHorizontalOffset(800, 24, 36, BrowserChromeAnchor.END))
-        .assertEqual(164);
+        .assertEqual(181);
+    });
+
+    it('keeps sheet content fixed while fitting narrow safe regions', 0, () => {
+      const phone: BrowserChromeLayoutFrame = browserChromeSurfaceFrame(366);
+      const wide: BrowserChromeLayoutFrame = browserChromeSurfaceFrame(900);
+      const narrow: BrowserChromeLayoutFrame = browserChromeSurfaceFrame(300, 16, 16);
+
+      expect(libraryContentCardWidth(phone.width)).assertEqual(326);
+      expect(libraryContentCardWidth(wide.width)).assertEqual(326);
+      expect(libraryListWidth(libraryContentCardWidth(phone.width))).assertEqual(260.8);
+      expect(libraryListWidth(libraryContentCardWidth(wide.width))).assertEqual(260.8);
+      expect(libraryContentCardWidth(narrow.width)).assertEqual(228);
+      expect(libraryListWidth(libraryContentCardWidth(narrow.width))).assertEqual(228);
+    });
+
+    it('keeps action targets and card widths stable across phone and wide windows', 0, () => {
+      expect(safariBottomChromeActionSlotWidth(366)).assertEqual(62);
+      expect(safariBottomChromeActionSlotWidth(900)).assertEqual(62);
+      expect(tabOverviewCardWidth(366)).assertEqual(161);
+      expect(tabOverviewCardWidth(900)).assertEqual(161);
+      expect(tabOverviewCardWidth(320)).assertEqual(138);
+    });
+
+    it('lands both live card columns inside the centered fixed grid on a wide window', 0, () => {
+      const first: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 0, 0);
+      const second: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 1, 0);
+
+      expect(first.clipLeft).assertEqual(283);
+      expect(second.clipLeft).assertEqual(456);
+      expect(first.clipWidth).assertEqual(161);
+      expect(second.clipWidth).assertEqual(161);
+      expect(first.clipHeight).assertEqual(242);
+      expect(second.clipHeight).assertEqual(242);
+    });
+
+    it('fits grid columns and live pages inside asymmetric narrow avoid areas', 0, () => {
+      const first: TabOverviewPageFrame = tabOverviewPageFrame(1, 300, 700, 0, 0, 0, 0, 32, 12);
+      const second: TabOverviewPageFrame = tabOverviewPageFrame(1, 300, 700, 1, 0, 0, 0, 32, 12);
+
+      expect(tabOverviewGridWidth(300, 32, 12)).assertEqual(256);
+      expect(tabOverviewGridLeft(300, 32, 12)).assertEqual(32);
+      expect(tabOverviewCardWidth(300, 32, 12)).assertEqual(106);
+      expect(first.clipLeft).assertEqual(48);
+      expect(second.clipLeft).assertEqual(166);
+      expect(first.clipWidth).assertEqual(106);
+      expect(second.clipLeft + second.clipWidth).assertEqual(272);
+      expect(first.scaleX).assertEqual(first.scaleY);
     });
 
     it('starts the overview morph from the same fixed chrome frame', 0, () => {
       const pageFrame: TabOverviewPageFrame = tabOverviewPageFrame(0, 800, 400, 0, 0);
       const chromeFrame: TabOverviewChromeFrame = tabOverviewChromeFrame(
-        0, false, 800, 400, 112, pageFrame, 200, 400);
+        0, false, 800, 400, 112, pageFrame, 217, 366);
 
-      expect(chromeFrame.addressLeft).assertEqual(200);
-      expect(chromeFrame.addressWidth).assertEqual(400);
-      expect(chromeFrame.addressVisualLeft).assertEqual(208);
-      expect(chromeFrame.addressVisualWidth).assertEqual(384);
+      expect(chromeFrame.addressLeft).assertEqual(217);
+      expect(chromeFrame.addressWidth).assertEqual(366);
+      expect(chromeFrame.addressVisualLeft).assertEqual(225);
+      expect(chromeFrame.addressVisualWidth).assertEqual(350);
     });
   });
 }

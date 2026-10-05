@@ -95,6 +95,14 @@ export class BrowserRepository {
     });
   }
 
+  /**
+   * A new app process starts with no open tabs. Returning from background does
+   * not call this method, so the live in-memory session remains untouched.
+   */
+  async clearSessionForColdStart(): Promise<void> {
+    await this.clearSession();
+  }
+
   /** Serialize save and exit-clear writes so a late save cannot restore a closed session. */
   private enqueueSessionOperation(operation: () => Promise<void>): Promise<void> {
     const next: Promise<void> = this.sessionOperation.then(operation, operation);

@@ -9,6 +9,15 @@ import { PageFontSize } from '../model/PageDisplayState';
 import { BrowserErrorState } from '../model/BrowserTypes';
 import { StartPageItem } from '../model/StartPageModels';
 import { PageIconRecord } from '../model/PageIconModels';
+import {
+  browserPullRefreshContentTranslation,
+  browserPullRefreshIndicatorMode,
+  browserPullRefreshOffset,
+  browserPullRefreshProgressPercent,
+  BrowserPullRefreshIndicatorMode,
+  shouldCaptureBrowserPullGesture,
+  shouldRefreshBrowserPageOnPullRelease
+} from '../model/BrowserPullRefresh';
 import { TabPreviewKind as MotionPreviewKind } from '../model/TabGestureMotion';
 import {
   shouldPreferStableStartPageFrame,
@@ -18,7 +27,6 @@ import {
   tabTransitionSceneVisualState
 } from '../model/SafariTabTransition';
 import {
-  TAB_OVERVIEW_CAPTION_FONT_SIZE,
   tabOverviewCaptionLocalRadius,
   TabOverviewLivePageCloseFrame,
   tabOverviewLivePageCloseFrame,
@@ -30,6 +38,11 @@ import {
   tabOverviewTransitionViewportClipsOverflow
 } from '../model/TabOverviewActions';
 import { WebNodeHostController } from '../web/WebTabNode';
+import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP
+} from '../model/BrowserVisualMetrics';
 
 /**
  * Native ArkUI page scene for Safari-style tab transitions.
@@ -43,6 +56,8 @@ export struct BrowserTransitionScene {
   @Require @Param settings: BrowserSettings;
   @Param viewportWidth: number = 400;
   @Param viewportHeight: number = 800;
+  @Param leftAvoidInset: number = 0;
+  @Param rightAvoidInset: number = 0;
   @Param topContentInset: number = 0;
   @Param bottomContentInset: number = 0;
   @Param currentX: number = 0;
@@ -80,6 +95,12 @@ export struct BrowserTransitionScene {
   /** True while the live page owns the single overview selection ring. */
   @Param showOverviewPageBorder: boolean = false;
   @Param interactionLocked: boolean = false;
+  @Param canPullToRefresh: boolean = false;
+  @Param isPullRefreshing: boolean = false;
+  @Param isPageAtTop: () => boolean = () => false;
+  @Param onPullRefresh: () => void = () => undefined;
+  @Local pullDownOffset: number = 0;
+  private pullGestureEligible: boolean = false;
   @Param currentItems: StartPageItem[] = [];
   @Param pageIcons: PageIconRecord[] = [];
   @Param pageIconRevision: number = 0;
@@ -94,6 +115,13 @@ export struct BrowserTransitionScene {
   @Param onBack: () => void = () => undefined;
   @Param onViewportChange: (width: number, height: number) => void =
     (_width: number, _height: number) => undefined;
+
+  @Monitor('isPullRefreshing')
+  private onPullRefreshStateChanged(): void {
+    if (!this.isPullRefreshing) {
+      this.settlePullDownOffset();
+    }
+  }
 
   private visualState(): TabTransitionSceneVisualState {
     return tabTransitionSceneVisualState(
@@ -195,6 +223,76 @@ export struct BrowserTransitionScene {
     return (1 - frame.scale) * (liveCenterY - this.sceneHeight() / 2);
   }
 
+  private pullRefreshLimit(): number {
+    return Number.isFinite(this.bottomContentInset) && this.bottomContentInset > 0
+      ? this.bottomContentInset
+      : 0;
+  }
+
+  private beginPullRefreshGesture(): void {
+    this.pullGestureEligible = shouldCaptureBrowserPullGesture(
+      this.canPullToRefresh,
+      this.isPageAtTop(),
+      this.interactionLocked,
+      this.pullRefreshLimit()
+    );
+    if (this.pullGestureEligible) {
+      this.pullDownOffset = 0;
+    }
+  }
+
+  private updatePullRefreshGesture(event: GestureEvent): void {
+    if (!this.pullGestureEligible) {
+      return;
+    }
+    if (!this.canPullToRefresh || this.interactionLocked || !this.isPageAtTop()) {
+      this.pullGestureEligible = false;
+      this.settlePullDownOffset();
+      return;
+    }
+    this.pullDownOffset = browserPullRefreshOffset(event.offsetY, this.pullRefreshLimit());
+  }
+
+  private finishPullRefreshGesture(event: GestureEvent): void {
+    this.updatePullRefreshGesture(event);
+    const shouldRefresh: boolean = this.pullGestureEligible && this.canPullToRefresh &&
+      !this.interactionLocked && this.isPageAtTop() &&
+      shouldRefreshBrowserPageOnPullRelease(this.pullDownOffset, this.pullRefreshLimit(), true);
+    this.pullGestureEligible = false;
+    if (shouldRefresh) {
+      this.pullDownOffset = this.pullRefreshLimit();
+      this.onPullRefresh();
+      return;
+    }
+    this.settlePullDownOffset();
+  }
+
+  private cancelPullRefreshGesture(): void {
+    this.pullGestureEligible = false;
+    this.settlePullDownOffset();
+  }
+
+  private settlePullDownOffset(): void {
+    if (this.pullDownOffset <= 0) {
+      return;
+    }
+    try {
+      this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+        this.pullDownOffset = 0;
+      });
+    } catch (_error) {
+      this.pullDownOffset = 0;
+    }
+  }
+
+  private pullRefreshIndicatorMode(): BrowserPullRefreshIndicatorMode {
+    return browserPullRefreshIndicatorMode(
+      this.pullDownOffset,
+      this.pullRefreshLimit(),
+      this.isPullRefreshing
+    );
+  }
+
   private hasCurrentContent(): boolean {
     // During a thumbnail-owned card close the active card is the only visual
     // owner. Removing the live scene from the tree is intentional: native
@@ -237,12 +335,17 @@ export struct BrowserTransitionScene {
   private buildCurrentPageScene() {
     Stack() {
       if (this.currentHost !== undefined) {
-        NodeContainer(this.currentHost)
-          .id(`transition-current-web-${this.currentHost.tabId}`)
+        Stack() {
+          NodeContainer(this.currentHost)
+            .id(`transition-current-web-${this.currentHost.tabId}`)
+            .width('100%')
+            .height('100%')
+            .clip(true)
+            .hitTestBehavior(this.interactionLocked ? HitTestMode.None : HitTestMode.Default);
+        }
           .width('100%')
           .height('100%')
-          .clip(true)
-          .hitTestBehavior(this.interactionLocked ? HitTestMode.None : HitTestMode.Default);
+          .translate(browserPullRefreshContentTranslation(this.pullDownOffset, this.pullRefreshLimit()));
       } else if (this.currentIsStartPage) {
         Stack() {
           // Keep the real StartPage mounted underneath the captured frame so
@@ -253,6 +356,8 @@ export struct BrowserTransitionScene {
             pageIconRevision: this.pageIconRevision,
             settings: this.settings,
             pageTranslateX: 0,
+            leftInset: this.leftAvoidInset,
+            rightInset: this.rightAvoidInset,
             onOpen: this.onOpen,
             onAddFavorite: this.onAddFavorite,
             onCustomize: this.onCustomize,
@@ -279,11 +384,37 @@ export struct BrowserTransitionScene {
           .height('100%')
           .hitTestBehavior(HitTestMode.None);
       }
+      if (this.pullRefreshIndicatorMode() !== BrowserPullRefreshIndicatorMode.HIDDEN) {
+        Stack() {
+          if (this.pullRefreshIndicatorMode() === BrowserPullRefreshIndicatorMode.REFRESHING) {
+            LoadingProgress()
+              .width(28)
+              .height(28)
+              .color('#0A59F7');
+          } else {
+            Progress({
+              value: browserPullRefreshProgressPercent(this.pullDownOffset, this.pullRefreshLimit()),
+              total: 100,
+              type: ProgressType.Ring
+            })
+              .width(28)
+              .height(28)
+              .color('#0A59F7');
+          }
+        }
+          .width(this.sceneWidth())
+          .height(this.pullDownOffset)
+          .position({ x: 0, y: 0 })
+          .clip(true)
+          .hitTestBehavior(HitTestMode.None);
+      }
       if (this.errorState !== undefined) {
         BrowserErrorView({
           error: this.errorState,
           onRetry: this.onRetry,
-          onBack: this.onBack
+          onBack: this.onBack,
+          leftInset: this.leftAvoidInset,
+          rightInset: this.rightAvoidInset
         });
       }
       // Cover the short ArkWeb compositor gap while the settled target is
@@ -304,7 +435,32 @@ export struct BrowserTransitionScene {
       .height(this.pageContentHeight())
       .position({ x: 0, y: this.pageContentTop() })
       .clip(true)
-      .translate({ x: this.currentX, y: 0, z: 0 });
+      .translate({ x: this.currentX, y: 0, z: 0 })
+      .priorityGesture(
+        PanGesture({ fingers: 1, direction: PanDirection.Down })
+          .allowedTypes([SourceTool.Finger])
+          .onActionStart(() => this.beginPullRefreshGesture())
+          .onActionUpdate((event: GestureEvent) => this.updatePullRefreshGesture(event))
+          .onActionEnd((event: GestureEvent) => this.finishPullRefreshGesture(event))
+          .onActionCancel(() => this.cancelPullRefreshGesture())
+      )
+      .onGestureRecognizerJudgeBegin(
+        (_event: BaseGestureEvent, current: GestureRecognizer,
+          _recognizers: Array<GestureRecognizer>): GestureJudgeResult => {
+          const target = current.getEventTargetInfo();
+          if (target !== undefined && target.getId() === 'transition-current-page-scene' &&
+            current.getType() === GestureControl.GestureType.PAN_GESTURE) {
+            const canCapture: boolean = shouldCaptureBrowserPullGesture(
+              this.canPullToRefresh,
+              this.isPageAtTop(),
+              this.interactionLocked,
+              this.pullRefreshLimit()
+            );
+            return canCapture ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+          }
+          return GestureJudgeResult.CONTINUE;
+        }
+      );
   }
 
   @Builder
@@ -332,6 +488,8 @@ export struct BrowserTransitionScene {
           pageIconRevision: this.pageIconRevision,
           settings: this.settings,
           pageTranslateX: 0,
+          leftInset: this.leftAvoidInset,
+          rightInset: this.rightAvoidInset,
           backgroundViewportHeight: this.backgroundViewportHeight()
         })
           .width('100%')
@@ -351,7 +509,7 @@ export struct BrowserTransitionScene {
   private buildOverviewCaption() {
     Row() {
       Text(this.overviewCaptionTitleText())
-        .fontSize(this.overviewCaptionMetric(TAB_OVERVIEW_CAPTION_FONT_SIZE))
+        .fontSize(this.overviewCaptionMetric(BROWSER_UI_TEXT_SIZE_VP))
         .fontWeight(FontWeight.Medium)
         .fontColor('#1D1D1F')
         .maxLines(1)
@@ -359,7 +517,9 @@ export struct BrowserTransitionScene {
         .layoutWeight(1);
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(this.overviewCaptionMetric(14))
+          .fontSize(this.overviewCaptionMetric(BROWSER_UI_ICON_SIZE_VP))
+          .width(this.overviewCaptionMetric(BROWSER_UI_ICON_CONTAINER_SIZE_VP))
+          .height(this.overviewCaptionMetric(BROWSER_UI_ICON_CONTAINER_SIZE_VP))
           .fontColor(['#69727C']);
       }
         .width(this.overviewCaptionMetric(28))

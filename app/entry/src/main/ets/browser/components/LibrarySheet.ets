@@ -2,6 +2,7 @@ import {
   filterLibraryEntries,
   HistoryDeleteRange,
   HistoryTimelineGroup,
+  historyDeleteCutoff,
   historyTimelineGroups,
   LIBRARY_DISMISS_THRESHOLD,
   LIBRARY_SEARCH_PULL_THRESHOLD,
@@ -11,12 +12,14 @@ import {
   libraryDismissShouldClose,
   libraryEntries,
   LibraryEntry,
+  librarySearchPullShouldCaptureGesture,
   librarySearchPullProgress,
+  librarySearchScrollFrame,
+  librarySearchSwipeReleaseOffset,
+  librarySearchSwipePullOffset,
+  librarySheetPullDismissEnabled,
   LibrarySection,
-  librarySectionAfterSwipe,
-  librarySectionBackground,
   librarySectionChrome,
-  librarySectionIndicatorOffset,
   visibleHistoryRecords
 } from '../model/LibraryModels';
 import { BookmarkRecord, HistoryRecord } from '../model/BrowserTypes';
@@ -35,19 +38,61 @@ import {
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
 import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP,
   BrowserChromeAnchor,
   browserChromeSurfaceFrame,
   browserChromeSurfaceHorizontalOffset,
+  libraryContentCardWidth,
+  libraryListWidth,
   HARMONY_RADIUS_CONTROL,
   HARMONY_RADIUS_FLOATING,
   HARMONY_RADIUS_SHEET,
-  LIBRARY_CONTENT_WIDTH_PERCENT
+  SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP,
+  safariBottomChromeUnpaintedAvoidAreaHeight
 } from '../model/BrowserVisualMetrics';
+
+const LIBRARY_TAB_HEIGHT_VP: number = 40;
 
 /**
  * Safari-like library sheet. This pass is deliberately visual: it aligns the
  * sheet chrome and list geometry while keeping the existing data callbacks.
  */
+const LIBRARY_SITE_ICON_SIZE: number = 24;
+const LIBRARY_SITE_ICON_SLOT_SIZE: number = 26;
+const LIBRARY_HISTORY_ICON_SIZE: number = 24;
+const LIBRARY_HISTORY_ICON_SLOT_SIZE: number = 26;
+
+interface LibraryScrollFrameHandlerResult {
+  offsetRemain: number;
+}
+
+interface HistoryRemovalVisual {
+  id: string;
+  entry: LibraryEntry;
+  headingKey: string;
+  headingTitle: string;
+  phase: number;
+}
+
+interface HistoryHeadingHeight {
+  key: string;
+  height: number;
+}
+
+interface HistoryHeadingAnchor {
+  key: string;
+  title: string;
+}
+
+const HISTORY_REMOVAL_PHASE_VISIBLE: number = 0;
+const HISTORY_REMOVAL_PHASE_SLIDING: number = 1;
+const HISTORY_REMOVAL_PHASE_COLLAPSING: number = 2;
+const HISTORY_ROW_HEIGHT_VP: number = 65;
+const HISTORY_SLIDE_DURATION_MS: number = 220;
+const HISTORY_COLLAPSE_DURATION_MS: number = 180;
+
 @ComponentV2
 export struct LibrarySheet {
   @Param history: HistoryRecord[] = [];
@@ -56,6 +101,7 @@ export struct LibrarySheet {
   @Param bookmarks: BookmarkRecord[] = [];
   @Param pageIcons: PageIconRecord[] = [];
   @Param pageIconRevision: number = 0;
+  @Param onMissingPageIcon: (url: string) => void = (_url: string) => undefined;
   /** System top avoid area in vp; the sheet keeps a visual breathing gap below it. */
   @Param topInset: number = 0;
   /** Bottom navigation-indicator avoid area in vp. */
@@ -72,11 +118,8 @@ export struct LibrarySheet {
   @Param onClose: () => void = () => undefined;
 
   @Local section: LibrarySection = LibrarySection.BOOKMARKS;
+  @Local sectionProgress: number = 0;
   @Local editing: boolean = false;
-  @Local sectionSwipeOffset: number = 0;
-  @Local sectionTransitionProgress: number = 1;
-  @Local sectionGestureActive: boolean = false;
-  @Local sectionTabsWidth: number = 0;
   @Local longPressEntryId: string = '';
   @Local menuEntryId: string = '';
   @Local suppressEntryClickId: string = '';
@@ -85,27 +128,56 @@ export struct LibrarySheet {
   @Local searchQuery: string = '';
   @Local searchPullOffset: number = 0;
   @Local searchRevealed: boolean = false;
-  @Local searchInputFocused: boolean = false;
   @Local searchPullFinished: boolean = false;
+  private searchCloseTouchStartX: number = 0;
+  private searchCloseTouchStartY: number = 0;
+  private searchCloseTouchStartOffset: number = 0;
+  private searchCloseTouchWasVisible: boolean = false;
+  private searchCloseTouchTracking: boolean = false;
+  private searchCloseTouchCancelPending: boolean = false;
   @Local editMenuShown: boolean = false;
   @Local editLongPressActive: boolean = false;
   @Local suppressEditClick: boolean = false;
   @Local hiddenHistoryEntryIds: string[] = [];
+  @Local historyRemovalVisuals: HistoryRemovalVisual[] = [];
+  @Local historyHeadingHeights: HistoryHeadingHeight[] = [];
   @Local visibleHistoryItems: string[] = [];
   private historyRenderEntries: Map<string, LibraryEntry> = new Map();
   private historyRenderTitles: Map<string, string> = new Map();
-  private sectionSwitchDirection: number = 1;
-  private sectionAnimationToken: number = 0;
+  private readonly bookmarkScroller: Scroller = new Scroller();
+  private readonly historyScroller: Scroller = new Scroller();
+  private readonly sectionSwiperController: SwiperController = new SwiperController();
+  private readonly sectionConnectorContext: CanvasRenderingContext2D =
+    new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private sheetAnimationToken: number = 0;
   private searchAnimationToken: number = 0;
+  private historyRemovalDisposed: boolean = false;
+  private historyRangeMenuDispatchLocked: boolean = false;
 
   aboutToAppear(): void {
+    this.historyRemovalDisposed = false;
     this.syncVisibleHistoryGroups();
+  }
+
+  aboutToDisappear(): void {
+    // Deletion callbacks have already been dispatched. Ignore late animation
+    // completions after the sheet closes without undoing those operations.
+    this.historyRemovalDisposed = true;
   }
 
   @Monitor('historyRevision')
   private onHistoryRevisionChanged(): void {
     this.syncVisibleHistoryGroups();
+  }
+
+  @Monitor('section')
+  private onLibrarySectionChanged(): void {
+    this.drawSectionTabShape();
+  }
+
+  @Monitor('sectionProgress')
+  private onLibrarySectionProgressChanged(): void {
+    this.drawSectionTabShape();
   }
 
   @Monitor('searchQuery')
@@ -114,6 +186,10 @@ export struct LibrarySheet {
   }
 
   private syncVisibleHistoryGroups(): void {
+    // A missing Param row may only be the shell's optimistic snapshot, not a
+    // committed repository read. Keep tombstones for this sheet lifetime so
+    // any late async refresh cannot flash a deleted ID back into the list.
+    // New visits receive a timestamp-based ID and remain visible.
     const visibleRecords: HistoryRecord[] = visibleHistoryRecords(
       this.history,
       this.hiddenHistoryEntryIds
@@ -133,7 +209,7 @@ export struct LibrarySheet {
     const renderEntries: Map<string, LibraryEntry> = new Map();
     const renderTitles: Map<string, string> = new Map();
     groups.forEach((group: HistoryTimelineGroup) => {
-      const headingKey: string = `history-heading-${group.section}`;
+      const headingKey: string = `history-heading-${group.title}`;
       renderItems.push(headingKey);
       renderTitles.set(headingKey, group.title);
       group.entries.forEach((entry: LibraryEntry) => {
@@ -141,9 +217,182 @@ export struct LibrarySheet {
         renderEntries.set(entry.id, entry);
       });
     });
+    // The shell updates history optimistically and then publishes a second
+    // repository snapshot. Keep each in-flight row and its date heading in
+    // the Repeat source until its collapse animation finishes.
+    this.historyRemovalVisuals.forEach((visual: HistoryRemovalVisual) => {
+      let headingIndex: number = renderItems.indexOf(visual.headingKey);
+      if (headingIndex < 0) {
+        let insertAt: number = renderItems.length;
+        for (let index: number = 0; index < renderItems.length; index++) {
+          const candidateHeading: string = renderItems[index];
+          if (candidateHeading.indexOf('history-heading-') !== 0) {
+            continue;
+          }
+          const candidateTimestamp: number = this.historyGroupFirstTimestamp(
+            renderItems,
+            index,
+            renderEntries
+          );
+          if (candidateTimestamp < visual.entry.timestamp) {
+            insertAt = index;
+            break;
+          }
+        }
+        renderItems.splice(insertAt, 0, visual.headingKey);
+        renderTitles.set(visual.headingKey, visual.headingTitle);
+        headingIndex = insertAt;
+      }
+      if (renderItems.indexOf(visual.id) >= 0) {
+        renderEntries.set(visual.id, visual.entry);
+        return;
+      }
+      let insertRowAt: number = renderItems.length;
+      for (let index: number = headingIndex + 1; index < renderItems.length; index++) {
+        const candidateKey: string = renderItems[index];
+        if (candidateKey.indexOf('history-heading-') === 0) {
+          insertRowAt = index;
+          break;
+        }
+        const candidate: LibraryEntry | undefined = renderEntries.get(candidateKey);
+        if (candidate !== undefined && candidate.timestamp < visual.entry.timestamp) {
+          insertRowAt = index;
+          break;
+        }
+      }
+      renderItems.splice(insertRowAt, 0, visual.id);
+      renderEntries.set(visual.id, visual.entry);
+    });
     this.historyRenderEntries = renderEntries;
     this.historyRenderTitles = renderTitles;
     this.visibleHistoryItems = renderItems;
+  }
+
+  private historyGroupFirstTimestamp(
+    items: string[],
+    headingIndex: number,
+    entries: Map<string, LibraryEntry>
+  ): number {
+    for (let index: number = headingIndex + 1; index < items.length; index++) {
+      const key: string = items[index];
+      if (key.indexOf('history-heading-') === 0) {
+        break;
+      }
+      const entry: LibraryEntry | undefined = entries.get(key);
+      if (entry !== undefined) {
+        return entry.timestamp;
+      }
+    }
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  private historyRemovalPhase(entryId: string): number {
+    for (let index: number = 0; index < this.historyRemovalVisuals.length; index++) {
+      if (this.historyRemovalVisuals[index].id === entryId) {
+        return this.historyRemovalVisuals[index].phase;
+      }
+    }
+    return -1;
+  }
+
+  private historyHeadingIsCollapsing(headingKey: string): boolean {
+    let hasRemoval: boolean = false;
+    for (let index: number = 0; index < this.historyRemovalVisuals.length; index++) {
+      const visual: HistoryRemovalVisual = this.historyRemovalVisuals[index];
+      if (visual.headingKey !== headingKey) {
+        continue;
+      }
+      hasRemoval = true;
+      if (visual.phase !== HISTORY_REMOVAL_PHASE_COLLAPSING) {
+        return false;
+      }
+    }
+    if (!hasRemoval) {
+      return false;
+    }
+    let foundHeading: boolean = false;
+    let hasRows: boolean = false;
+    for (let index: number = 0; index < this.visibleHistoryItems.length; index++) {
+      const key: string = this.visibleHistoryItems[index];
+      if (key === headingKey) {
+        foundHeading = true;
+        continue;
+      }
+      if (!foundHeading) {
+        continue;
+      }
+      if (key.indexOf('history-heading-') === 0) {
+        break;
+      }
+      hasRows = true;
+      if (this.historyRemovalPhase(key) < 0) {
+        return false;
+      }
+    }
+    return hasRows;
+  }
+
+  private historyHeadingHasPendingRemoval(headingKey: string): boolean {
+    for (let index: number = 0; index < this.historyRemovalVisuals.length; index++) {
+      if (this.historyRemovalVisuals[index].headingKey === headingKey) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private historyHeadingHeight(headingKey: string): number | string {
+    for (let index: number = 0; index < this.historyHeadingHeights.length; index++) {
+      if (this.historyHeadingHeights[index].key === headingKey) {
+        return this.historyHeadingHeights[index].height;
+      }
+    }
+    return 'auto';
+  }
+
+  private rememberHistoryHeadingHeight(headingKey: string, height: number): void {
+    if (height <= 0 || this.historyHeadingIsCollapsing(headingKey)) {
+      return;
+    }
+    const measured: HistoryHeadingHeight[] = [...this.historyHeadingHeights];
+    const index: number = measured.findIndex((value: HistoryHeadingHeight): boolean =>
+      value.key === headingKey
+    );
+    if (index >= 0) {
+      if (Math.abs(measured[index].height - height) < 0.5) {
+        return;
+      }
+      measured[index] = { key: headingKey, height: height };
+    } else {
+      measured.push({ key: headingKey, height: height });
+    }
+    this.historyHeadingHeights = measured;
+  }
+
+  private historyHeadingForEntry(entryId: string): HistoryHeadingAnchor {
+    let headingKey: string = '';
+    let headingTitle: string = '';
+    for (let index: number = 0; index < this.visibleHistoryItems.length; index++) {
+      const key: string = this.visibleHistoryItems[index];
+      if (key.indexOf('history-heading-') === 0) {
+        headingKey = key;
+        headingTitle = this.historyRenderTitle(key);
+      }
+      if (key === entryId) {
+        break;
+      }
+    }
+    return { key: headingKey, title: headingTitle };
+  }
+
+  private historyVisualWithPhase(visual: HistoryRemovalVisual, phase: number): HistoryRemovalVisual {
+    return {
+      id: visual.id,
+      entry: visual.entry,
+      headingKey: visual.headingKey,
+      headingTitle: visual.headingTitle,
+      phase: phase
+    };
   }
 
   private historyRenderTitle(key: string): string {
@@ -163,9 +412,29 @@ export struct LibrarySheet {
   @Builder
   private historyRenderItem(key: string) {
     if (key.indexOf('history-heading-') === 0) {
-      this.timelineHeading(this.historyRenderTitle(key));
+      Column() {
+        this.timelineHeading(this.historyRenderTitle(key));
+      }
+        .id(`library-history-heading-wrap-${key}`)
+        .width('100%')
+        .height(this.historyHeadingIsCollapsing(key)
+          ? 0
+          : this.historyHeadingHasPendingRemoval(key) ? this.historyHeadingHeight(key) : 'auto')
+        .clip(true);
     } else {
-      this.entryRow(this.historyRenderEntry(key));
+      Column() {
+        this.entryRow(this.historyRenderEntry(key));
+      }
+        .id(`library-history-removal-wrap-${key}`)
+        .width('100%')
+        .height(this.historyRemovalPhase(key) === HISTORY_REMOVAL_PHASE_COLLAPSING
+          ? 0 : HISTORY_ROW_HEIGHT_VP)
+        .clip(true)
+        .translate({
+          x: this.historyRemovalPhase(key) >= HISTORY_REMOVAL_PHASE_SLIDING
+            ? -Math.max(this.sheetWidth(), this.viewportWidth) : 0
+        })
+        .opacity(this.historyRemovalPhase(key) >= HISTORY_REMOVAL_PHASE_SLIDING ? 0 : 1);
     }
   }
 
@@ -173,82 +442,132 @@ export struct LibrarySheet {
     return librarySectionChrome(section).title;
   }
 
-  private sectionIndicatorOffset(): number {
-    const segmentWidth: number = Math.max(0, (this.sectionTabsWidth - 4) / 2);
-    return librarySectionIndicatorOffset(this.section, segmentWidth);
+  private drawSectionTabShape(): void {
+    const context: CanvasRenderingContext2D = this.sectionConnectorContext;
+    const width: number = context.width;
+    const height: number = context.height;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+    context.clearRect(0, 0, width, height);
+    context.beginPath();
+    const curveFactor: number = 0.55228475;
+    // Derive the shoulder radius from the measured 40vp canvas height.
+    const radius: number = height * 12 / LIBRARY_TAB_HEIGHT_VP;
+    const progress: number = Math.max(0, Math.min(1, this.sectionProgress));
+    const tabLeft: number = width / 2 * progress;
+    const tabRight: number = tabLeft + width / 2;
+    const leftShoulder: number = Math.min(radius, tabLeft);
+    const rightShoulder: number = Math.min(radius, width - tabRight);
+
+    context.moveTo(tabLeft - leftShoulder, height);
+    if (leftShoulder > 0) {
+      context.bezierCurveTo(
+        tabLeft - leftShoulder + curveFactor * leftShoulder,
+        height,
+        tabLeft,
+        height - leftShoulder + curveFactor * leftShoulder,
+        tabLeft,
+        height - leftShoulder
+      );
+    }
+    context.lineTo(tabLeft, radius);
+    context.bezierCurveTo(
+      tabLeft,
+      radius - curveFactor * radius,
+      tabLeft + radius - curveFactor * radius,
+      0,
+      tabLeft + radius,
+      0
+    );
+    context.lineTo(tabRight - radius, 0);
+    context.bezierCurveTo(
+      tabRight - radius + curveFactor * radius,
+      0,
+      tabRight,
+      radius - curveFactor * radius,
+      tabRight,
+      radius
+    );
+    context.lineTo(tabRight, height - rightShoulder);
+    if (rightShoulder > 0) {
+      context.bezierCurveTo(
+        tabRight,
+        height - rightShoulder + curveFactor * rightShoulder,
+        tabRight + rightShoulder - curveFactor * rightShoulder,
+        height,
+        tabRight + rightShoulder,
+        height
+      );
+    }
+    context.closePath();
+    context.fillStyle = '#FFFFFF';
+    context.fill();
   }
 
-  private updateSectionTabsWidth(area: Area): void {
-    const width: number = Number(area.width);
-    if (Number.isFinite(width) && width > 0 && this.sectionTabsWidth !== width) {
-      this.sectionTabsWidth = width;
-    }
+  private hexColorByte(value: number): string {
+    const digits: string = '0123456789ABCDEF';
+    const byte: number = Math.max(0, Math.min(255, Math.round(value)));
+    return digits.charAt(Math.floor(byte / 16)) + digits.charAt(byte % 16);
+  }
+
+  private sectionIconTint(section: LibrarySection): string {
+    const selectedProgress: number = section === LibrarySection.BOOKMARKS
+      ? 1 - this.sectionProgress
+      : this.sectionProgress;
+    const inactiveProgress: number = 1 - selectedProgress;
+    const red: number = 170 * inactiveProgress;
+    const green: number = 122 * selectedProgress + 178 * inactiveProgress;
+    const blue: number = 255 * selectedProgress + 189 * inactiveProgress;
+    return `#${this.hexColorByte(red)}${this.hexColorByte(green)}${this.hexColorByte(blue)}`;
+  }
+
+  private sectionTabsWidth(): number {
+    return Math.max(0, this.sheetWidth() - 24);
+  }
+
+  private libraryCardTopLeftRadius(): number {
+    const tabLeft: number = this.sectionProgress * this.sectionTabsWidth() / 2;
+    const leftShoulder: number = Math.min(12, tabLeft);
+    return Math.min(HARMONY_RADIUS_SHEET, Math.max(0, tabLeft - leftShoulder));
+  }
+
+  private libraryCardTopRightRadius(): number {
+    const width: number = this.sectionTabsWidth();
+    const tabRight: number = this.sectionProgress * width / 2 + width / 2;
+    const rightShoulder: number = Math.min(12, width - tabRight);
+    return Math.min(HARMONY_RADIUS_SHEET, Math.max(0, width - tabRight - rightShoulder));
   }
 
   private selectSection(next: LibrarySection): void {
+    this.sectionSwiperController.changeIndex(
+      next === LibrarySection.BOOKMARKS ? 0 : 1,
+      true
+    );
+  }
+
+  private onSectionSwiperChange(index: number): void {
+    const next: LibrarySection = index === 0
+      ? LibrarySection.BOOKMARKS
+      : LibrarySection.HISTORY;
     if (next === this.section) {
       return;
     }
-    this.sectionSwitchDirection = next === LibrarySection.HISTORY ? -1 : 1;
-    this.sectionTransitionProgress = 0;
-    this.sectionSwipeOffset = 0;
-    this.section = next;
-    const token: number = this.sectionAnimationToken + 1;
-    this.sectionAnimationToken = token;
-    this.getUIContext().animateTo({
-      curve: curves.springMotion(),
-      onFinish: () => {
-        if (token === this.sectionAnimationToken) {
-          this.sectionTransitionProgress = 1;
-          this.sectionSwipeOffset = 0;
-        }
-      }
-    }, () => {
-      this.sectionTransitionProgress = 1;
+    // Update the final section used by business logic; visual progress and
+    // shell geometry are driven frame-by-frame by the Swiper scroll callback.
+    this.getUIContext().animateTo({ duration: 0 }, () => {
+      this.section = next;
     });
   }
 
-  private beginSectionSwipe(): void {
-    this.sectionGestureActive = true;
-    this.sectionSwipeOffset = 0;
-  }
-
-  private updateSectionSwipe(event?: GestureEvent): void {
-    if (!this.sectionGestureActive) {
-      return;
+  private onSectionSwiperScroll(selectedIndex: number, index: number, position: number,
+    mainAxisLength: number): void {
+    void selectedIndex;
+    void mainAxisLength;
+    const progress: number = Math.max(0, Math.min(1, index - position));
+    if (Math.abs(progress - this.sectionProgress) > 0.0001) {
+      this.sectionProgress = progress;
     }
-    const offset: number = event?.offsetX ?? 0;
-    this.sectionSwipeOffset = Math.max(-96, Math.min(96, offset));
-  }
-
-  private finishSectionSwipe(event?: GestureEvent): void {
-    if (!this.sectionGestureActive) {
-      return;
-    }
-    const offset: number = Math.abs(this.sectionSwipeOffset) > 0
-      ? this.sectionSwipeOffset
-      : (event?.offsetX ?? 0);
-    this.sectionGestureActive = false;
-    const next: LibrarySection = librarySectionAfterSwipe(this.section, offset);
-    if (next !== this.section) {
-      this.selectSection(next);
-      return;
-    }
-    this.getUIContext().animateTo({ curve: curves.springMotion() }, () => {
-      this.sectionSwipeOffset = 0;
-      this.sectionTransitionProgress = 1;
-    });
-  }
-
-  private cancelSectionSwipe(): void {
-    if (!this.sectionGestureActive && this.sectionSwipeOffset === 0) {
-      return;
-    }
-    this.sectionGestureActive = false;
-    this.getUIContext().animateTo({ curve: curves.springMotion() }, () => {
-      this.sectionSwipeOffset = 0;
-      this.sectionTransitionProgress = 1;
-    });
   }
 
   private beginSheetSwipe(): void {
@@ -305,13 +624,16 @@ export struct LibrarySheet {
   }
 
   private beginSearchPull(): void {
+    if (this.searchCloseTouchTracking && this.searchCloseTouchWasVisible) {
+      return;
+    }
     this.searchAnimationToken += 1;
     this.searchPullOffset = this.searchRevealed ? LIBRARY_SEARCH_PULL_THRESHOLD : 0;
     this.searchPullFinished = false;
   }
 
   private updateSearchPull(event?: GestureEvent): void {
-    if (this.searchPullFinished) {
+    if (this.searchPullFinished || (this.searchCloseTouchTracking && this.searchCloseTouchWasVisible)) {
       return;
     }
     const baseOffset: number = this.searchRevealed ? LIBRARY_SEARCH_PULL_THRESHOLD : 0;
@@ -328,11 +650,187 @@ export struct LibrarySheet {
   }
 
   private cancelSearchPull(): void {
+    if (this.searchCloseTouchCancelPending) {
+      this.searchCloseTouchCancelPending = false;
+      this.searchPullFinished = true;
+      return;
+    }
     this.searchPullFinished = true;
     if (this.searchPullOffset <= 0 && !this.searchRevealed) {
       return;
     }
     this.animateSearchTo(0, false);
+  }
+
+  private activeListScrollOffsetY(section: LibrarySection = this.section): number {
+    if (section === LibrarySection.HISTORY && this.visibleHistoryItems.length === 0) {
+      return 0;
+    }
+    try {
+      return section === LibrarySection.BOOKMARKS
+        ? this.bookmarkScroller.currentOffset().yOffset
+        : this.historyScroller.currentOffset().yOffset;
+    } catch (_error) {
+      // A conditional Scroll may not have been bound on its first render yet.
+      // Unknown position must not let the parent steal the list's gesture.
+      return Number.NaN;
+    }
+  }
+
+  private judgeSearchPullGesture(
+    event: BaseGestureEvent,
+    current: GestureRecognizer,
+    targetId: string
+  ): GestureJudgeResult {
+    const target = current.getEventTargetInfo();
+    if (target === undefined || target.getId() !== targetId || current.isBuiltIn() ||
+      current.getType() !== GestureControl.GestureType.PAN_GESTURE) {
+      return GestureJudgeResult.CONTINUE;
+    }
+    const panEvent = event as PanGestureEvent;
+    const scrollOffsetY: number = this.activeListScrollOffsetY();
+    const canCapture: boolean = librarySearchPullShouldCaptureGesture(
+      scrollOffsetY,
+      panEvent.offsetY,
+      this.searchRevealed
+    );
+    return canCapture ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+  }
+
+  private handleSearchCloseTouch(event?: TouchEvent): void {
+    if (event === undefined) {
+      return;
+    }
+    if (event.type === TouchType.Down) {
+      if (event.changedTouches.length === 0) {
+        this.searchCloseTouchTracking = false;
+        this.searchCloseTouchWasVisible = false;
+        return;
+      }
+      const touch = event.changedTouches[0];
+      this.searchCloseTouchStartX = touch.x;
+      this.searchCloseTouchStartY = touch.y;
+      this.searchCloseTouchWasVisible = this.searchRevealed || this.searchPullOffset > 0;
+      this.searchCloseTouchStartOffset = this.searchCloseTouchWasVisible
+        ? (this.searchPullOffset > 0 ? this.searchPullOffset : LIBRARY_SEARCH_PULL_THRESHOLD)
+        : 0;
+      this.searchCloseTouchTracking = true;
+      this.searchCloseTouchCancelPending = false;
+      if (this.searchCloseTouchWasVisible) {
+        this.searchAnimationToken += 1;
+        this.searchPullFinished = false;
+      }
+      return;
+    }
+    if (event.type === TouchType.Cancel) {
+      const restoreSearch: boolean = this.searchCloseTouchWasVisible;
+      this.searchCloseTouchTracking = false;
+      this.searchCloseTouchWasVisible = false;
+      if (restoreSearch) {
+        this.searchCloseTouchCancelPending = true;
+        this.searchPullFinished = true;
+        this.animateSearchTo(LIBRARY_SEARCH_PULL_THRESHOLD, true);
+      }
+      return;
+    }
+    if (!this.searchCloseTouchTracking ||
+      (event.type !== TouchType.Move && event.type !== TouchType.Up) || event.changedTouches.length === 0) {
+      return;
+    }
+    const touch = event.changedTouches[0];
+    if (this.searchCloseTouchWasVisible) {
+      const deltaX: number = touch.x - this.searchCloseTouchStartX;
+      const deltaY: number = touch.y - this.searchCloseTouchStartY;
+      this.searchPullOffset = librarySearchSwipePullOffset(
+        this.searchCloseTouchStartOffset,
+        deltaX,
+        deltaY
+      );
+      if (event.type === TouchType.Up) {
+        const targetOffset: number = librarySearchSwipeReleaseOffset(
+          this.searchPullOffset,
+          deltaX,
+          deltaY,
+          true
+        );
+        this.searchCloseTouchTracking = false;
+        this.searchCloseTouchWasVisible = false;
+        this.searchCloseTouchCancelPending = false;
+        this.searchPullFinished = true;
+        if (targetOffset === 0) {
+          this.animateSearchTo(0, false);
+        }
+        return;
+      }
+    }
+    if (event.type === TouchType.Up) {
+      this.searchCloseTouchTracking = false;
+      this.searchCloseTouchWasVisible = false;
+    }
+  }
+
+  private handleLibraryScrollTouch(event?: TouchEvent): void {
+    if (event === undefined) {
+      return;
+    }
+    if (event.type === TouchType.Down) {
+      this.searchCloseTouchTracking = event.changedTouches.length > 0;
+      this.searchCloseTouchWasVisible = this.searchRevealed || this.searchPullOffset > 0;
+      this.searchCloseTouchCancelPending = false;
+      this.searchPullFinished = false;
+      if (this.searchCloseTouchWasVisible) {
+        this.searchAnimationToken += 1;
+      }
+      return;
+    }
+    if (event.type === TouchType.Cancel) {
+      const restoreSearch: boolean = this.searchCloseTouchWasVisible;
+      const discardPartialReveal: boolean = !restoreSearch && this.searchPullOffset > 0;
+      this.searchCloseTouchTracking = false;
+      this.searchCloseTouchWasVisible = false;
+      this.searchPullFinished = true;
+      if (restoreSearch) {
+        this.animateSearchTo(LIBRARY_SEARCH_PULL_THRESHOLD, true);
+      } else if (discardPartialReveal) {
+        this.animateSearchTo(0, false);
+      }
+      return;
+    }
+    if (event.type !== TouchType.Up || !this.searchCloseTouchTracking) {
+      return;
+    }
+    const searchWasVisible: boolean = this.searchCloseTouchWasVisible;
+    this.searchCloseTouchTracking = false;
+    this.searchCloseTouchWasVisible = false;
+    this.searchCloseTouchCancelPending = false;
+    if (searchWasVisible) {
+      this.searchPullFinished = true;
+      this.searchRevealed = this.searchPullOffset > 0;
+      return;
+    }
+    if (this.searchPullOffset > 0) {
+      this.finishSearchPull();
+    }
+  }
+
+  private handleLibraryScrollFrame(
+    offset: number,
+    section: LibrarySection
+  ): LibraryScrollFrameHandlerResult {
+    const searchWasVisible: boolean = this.searchRevealed || this.searchPullOffset > 0;
+    const frame = librarySearchScrollFrame(
+      offset,
+      this.searchPullOffset,
+      this.activeListScrollOffsetY(section),
+      this.searchCloseTouchTracking
+    );
+    this.searchPullOffset = frame.searchOffset;
+    if (this.searchCloseTouchWasVisible) {
+      this.searchRevealed = frame.searchOffset > 0;
+    } else if (searchWasVisible && frame.searchOffset <= 0 && offset > 0) {
+      this.searchRevealed = false;
+    }
+    return { offsetRemain: frame.offsetRemain };
   }
 
   private animateSearchTo(targetOffset: number, reveal: boolean): void {
@@ -372,75 +870,189 @@ export struct LibrarySheet {
   }
 
   @Builder
-  private sectionIcon(section: LibrarySection, size: number, color: string) {
+  private sectionIcon(section: LibrarySection) {
     if (section === LibrarySection.BOOKMARKS) {
       SymbolGlyph($r('sys.symbol.bookmark'))
-        .fontSize(size)
-        .fontColor([color]);
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .fontColor([this.sectionIconTint(section)]);
     } else {
       SymbolGlyph($r('sys.symbol.clock'))
-        .fontSize(size)
-        .fontColor([color]);
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .fontColor([this.sectionIconTint(section)]);
     }
   }
 
   @Builder
   private sectionButton(section: LibrarySection) {
     Button({ type: ButtonType.Normal, stateEffect: false }) {
-      this.sectionIcon(section, 18, this.section === section ? '#1D1D1F' : '#6B7280');
+      Row() {
+        this.sectionIcon(section);
+      }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center);
     }
       .id(`library-section-${section}`)
+      .width('100%')
       .layoutWeight(1)
-      .height(24)
-      .padding(0)
+      .height(LIBRARY_TAB_HEIGHT_VP)
+      .padding({ left: 8, right: 8 })
       .backgroundColor(Color.Transparent)
+      .borderRadius(0)
       .stateEffect(false)
-      // The selected segment is inset by 2vp. A 12vp radius keeps its corner
-      // arc center aligned with the outer 20vp floating surface (the native
-      // layout clamps both radii to the control height when necessary).
-      .borderRadius(HARMONY_RADIUS_CONTROL)
+      .accessibilityText(this.sectionTitle(section))
       .onClick(() => this.selectSection(section));
+  }
+
+  @Builder
+  private sectionTabShapeCanvas() {
+    Canvas(this.sectionConnectorContext)
+      .id(`library-tab-shape-${this.section}`)
+      .width('100%')
+      .height(LIBRARY_TAB_HEIGHT_VP)
+      .hitTestBehavior(HitTestMode.Transparent)
+      .onReady(() => this.drawSectionTabShape())
+      .onAreaChange((_oldArea: Area, _newArea: Area) => this.drawSectionTabShape());
   }
 
   @Builder
   private bookmarkFolderRow() {
     Row({ space: 12 }) {
-      SymbolGlyph($r('sys.symbol.star'))
-        .fontSize(20)
-        .fontColor(['#007AFF']);
       Text('书签')
-        .fontSize(14)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#1D1D1F');
       Blank().layoutWeight(1);
       SymbolGlyph($r('sys.symbol.chevron_right'))
-        .fontSize(14)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor(['#C7C7CC']);
     }
       .id('library-bookmarks-folder')
       .width('100%')
       .height(36)
-      .padding({ left: 8, right: 8 });
+      .padding({ left: 8, right: 8 })
+      .margin({ top: 12 * (1 - this.searchProgress()) });
   }
 
-  private entries(): LibraryEntry[] {
+  private entries(section: LibrarySection): LibraryEntry[] {
     void this.pageIconRevision;
-    return libraryEntries(this.section, this.history, this.bookmarks, this.pageIcons);
+    return libraryEntries(section, this.history, this.bookmarks, this.pageIcons);
   }
 
-  private filteredEntries(): LibraryEntry[] {
-    return filterLibraryEntries(this.entries(), this.searchQuery);
+  private filteredEntries(section: LibrarySection): LibraryEntry[] {
+    return filterLibraryEntries(this.entries(section), this.searchQuery);
   }
 
   private removeEntry(entry: LibraryEntry): void {
     if (entry.section === LibrarySection.BOOKMARKS) {
       this.onRemoveBookmark(entry.url);
     } else {
-      if (this.hiddenHistoryEntryIds.indexOf(entry.id) < 0) {
-        this.hiddenHistoryEntryIds = [...this.hiddenHistoryEntryIds, entry.id];
-        this.syncVisibleHistoryGroups();
+      if (this.historyRemovalPhase(entry.id) >= 0 ||
+        this.hiddenHistoryEntryIds.indexOf(entry.id) >= 0) {
+        return;
       }
+      this.beginHistoryRemoval([entry]);
       this.onRemoveHistory(entry);
     }
+  }
+
+  private removeHistoryRange(range: HistoryDeleteRange): void {
+    const cutoff: number | undefined = range === HistoryDeleteRange.ALL
+      ? undefined
+      : historyDeleteCutoff(range, Date.now());
+    const matchingEntries: LibraryEntry[] = [];
+    this.visibleHistoryItems.forEach((key: string) => {
+      if (key.indexOf('history-heading-') === 0) {
+        return;
+      }
+      const entry: LibraryEntry | undefined = this.historyRenderEntries.get(key);
+      if (entry === undefined || this.historyRemovalPhase(entry.id) >= 0) {
+        return;
+      }
+      if (range === HistoryDeleteRange.ALL ||
+        (cutoff !== undefined && entry.timestamp >= cutoff)) {
+        matchingEntries.push(entry);
+      }
+    });
+    // The range callback remains the sole business operation. The snapshot is
+    // only the set of currently rendered rows that can participate visually.
+    this.beginHistoryRemoval(matchingEntries);
+    this.onDeleteHistoryRange(range);
+  }
+
+  private beginHistoryRemoval(entries: LibraryEntry[]): void {
+    const additions: HistoryRemovalVisual[] = [];
+    entries.forEach((entry: LibraryEntry) => {
+      if (this.historyRemovalPhase(entry.id) >= 0 ||
+        this.hiddenHistoryEntryIds.indexOf(entry.id) >= 0) {
+        return;
+      }
+      const heading = this.historyHeadingForEntry(entry.id);
+      additions.push({
+        id: entry.id,
+        entry: entry,
+        headingKey: heading.key,
+        headingTitle: heading.title,
+        phase: HISTORY_REMOVAL_PHASE_VISIBLE
+      });
+    });
+    if (additions.length === 0) {
+      return;
+    }
+    const ids: string[] = additions.map((visual: HistoryRemovalVisual): string => visual.id);
+    this.historyRemovalVisuals = [...this.historyRemovalVisuals, ...additions];
+    this.syncVisibleHistoryGroups();
+    this.getUIContext().animateTo({
+      duration: HISTORY_SLIDE_DURATION_MS,
+      curve: Curve.EaseIn,
+      onFinish: () => this.beginHistoryCollapse(ids)
+    }, () => {
+      this.historyRemovalVisuals = this.historyRemovalVisuals.map((visual: HistoryRemovalVisual) =>
+        ids.indexOf(visual.id) >= 0
+          ? this.historyVisualWithPhase(visual, HISTORY_REMOVAL_PHASE_SLIDING)
+          : visual
+      );
+    });
+  }
+
+  private beginHistoryCollapse(ids: string[]): void {
+    if (this.historyRemovalDisposed) {
+      return;
+    }
+    this.getUIContext().animateTo({
+      duration: HISTORY_COLLAPSE_DURATION_MS,
+      curve: Curve.EaseInOut,
+      onFinish: () => this.finishHistoryRemoval(ids)
+    }, () => {
+      this.historyRemovalVisuals = this.historyRemovalVisuals.map((visual: HistoryRemovalVisual) =>
+        ids.indexOf(visual.id) >= 0
+          ? this.historyVisualWithPhase(visual, HISTORY_REMOVAL_PHASE_COLLAPSING)
+          : visual
+      );
+    });
+  }
+
+  private finishHistoryRemoval(ids: string[]): void {
+    if (this.historyRemovalDisposed) {
+      return;
+    }
+    const finishedIds: string[] = this.historyRemovalVisuals
+      .filter((visual: HistoryRemovalVisual): boolean => ids.indexOf(visual.id) >= 0)
+      .map((visual: HistoryRemovalVisual): string => visual.id);
+    if (finishedIds.length === 0) {
+      return;
+    }
+    this.hiddenHistoryEntryIds = [...this.hiddenHistoryEntryIds, ...finishedIds];
+    this.historyRemovalVisuals = this.historyRemovalVisuals.filter(
+      (visual: HistoryRemovalVisual): boolean => ids.indexOf(visual.id) < 0
+    );
+    this.syncVisibleHistoryGroups();
   }
 
   private beginEntryLongPress(entry: LibraryEntry): void {
@@ -486,6 +1098,16 @@ export struct LibrarySheet {
     this.editLongPressActive = true;
     this.editMenuShown = true;
     this.suppressEditClick = true;
+    this.historyRangeMenuDispatchLocked = false;
+  }
+
+  private dispatchHistoryRangeFromMenu(range: HistoryDeleteRange): void {
+    if (this.historyRangeMenuDispatchLocked) {
+      return;
+    }
+    this.historyRangeMenuDispatchLocked = true;
+    this.removeHistoryRange(range);
+    this.dismissEditMenu();
   }
 
   private endEditLongPress(): void {
@@ -513,24 +1135,21 @@ export struct LibrarySheet {
         .contentFontColor('#FF3B30')
         .onChange((selected: boolean) => {
           if (selected) {
-            this.onDeleteHistoryRange(HistoryDeleteRange.TODAY);
-            this.dismissEditMenu();
+            this.dispatchHistoryRangeFromMenu(HistoryDeleteRange.TODAY);
           }
         })
       MenuItem({ content: '删除本周历史记录' })
         .contentFontColor('#FF3B30')
         .onChange((selected: boolean) => {
           if (selected) {
-            this.onDeleteHistoryRange(HistoryDeleteRange.THIS_WEEK);
-            this.dismissEditMenu();
+            this.dispatchHistoryRangeFromMenu(HistoryDeleteRange.THIS_WEEK);
           }
         })
       MenuItem({ content: '删除全部历史记录' })
         .contentFontColor('#FF3B30')
         .onChange((selected: boolean) => {
           if (selected) {
-            this.onDeleteHistoryRange(HistoryDeleteRange.ALL);
-            this.dismissEditMenu();
+            this.dispatchHistoryRangeFromMenu(HistoryDeleteRange.ALL);
           }
         })
     }
@@ -557,16 +1176,24 @@ export struct LibrarySheet {
   }
 
   @Builder
-  private entryIcon(entry: LibraryEntry) {
+  private entryIcon(entry: LibraryEntry, iconSize: number) {
     if (this.iconSourceFor(entry).length > 0) {
       Image(this.iconSourceFor(entry))
-        .width(28)
-        .height(28)
+        .width(iconSize)
+        .height(iconSize)
         .objectFit(ImageFit.Contain);
     } else {
       SymbolGlyph($r('sys.symbol.display'))
-        .fontSize(22)
-        .fontColor(['#007AFF']);
+        .fontSize(iconSize)
+        .fontColor(['#007AFF'])
+        .onVisibleAreaApproximateChange(
+          { ratios: [0.0], expectedUpdateInterval: 300 },
+          (isExpanding: boolean, currentRatio: number): void => {
+            if (isExpanding && currentRatio > 0 && entry.url.trim().length > 0) {
+              this.onMissingPageIcon(entry.url);
+            }
+          }
+        );
     }
   }
 
@@ -588,7 +1215,9 @@ export struct LibrarySheet {
         if (this.editing) {
           Button({ type: ButtonType.Normal, stateEffect: false }) {
             SymbolGlyph($r('sys.symbol.minus_circle_fill'))
-              .fontSize(18)
+              .fontSize(BROWSER_UI_ICON_SIZE_VP)
+              .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
               .fontColor(['#FF3B30']);
           }
             .id(`library-delete-${entry.id}`)
@@ -599,43 +1228,71 @@ export struct LibrarySheet {
             .stateEffect(false)
             .onClick(() => this.removeEntry(entry));
         }
-        Stack() {
-          this.entryIcon(entry);
-        }
-          .width(32)
-          .height(32)
-          .alignContent(Alignment.Center);
-        Column({ space: 2 }) {
-          Text(entry.title)
-            .fontSize(14)
-            .fontColor('#1D1D1F')
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%');
-          if (entry.section !== LibrarySection.BOOKMARKS) {
-            Text(entry.url)
-              .fontSize(11)
-              .fontColor('#8A8A90')
+        if (entry.section === LibrarySection.HISTORY) {
+          Text(entry.timeText ?? '')
+            .width(42)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#6B6B72')
+            .textAlign(TextAlign.Center)
+            .maxLines(1);
+          Row({ space: 8 }) {
+            Stack() {
+              this.entryIcon(entry, LIBRARY_HISTORY_ICON_SIZE);
+            }
+              .width(LIBRARY_HISTORY_ICON_SLOT_SIZE)
+              .height(LIBRARY_HISTORY_ICON_SLOT_SIZE)
+              .alignContent(Alignment.Center);
+            Column({ space: 2 }) {
+              Text(entry.title)
+                .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+                .fontColor('#1D1D1F')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%');
+              Text(entry.shortUrl ?? '')
+                .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+                .fontColor('#8A8A90')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%');
+            }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start);
+          }
+            .width('100%')
+            .alignItems(VerticalAlign.Center);
+        } else {
+          Stack() {
+            this.entryIcon(entry, LIBRARY_SITE_ICON_SIZE);
+          }
+            .width(LIBRARY_SITE_ICON_SLOT_SIZE)
+            .height(LIBRARY_SITE_ICON_SLOT_SIZE)
+            .alignContent(Alignment.Center);
+          Column({ space: 2 }) {
+            Text(entry.title)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+              .fontColor('#1D1D1F')
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%');
           }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start);
         }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start);
       }
         .width('100%')
-        .height(entry.section === LibrarySection.BOOKMARKS ? 52 : 60);
+        .height(entry.section === LibrarySection.BOOKMARKS ? 52 : 64)
+        .alignItems(VerticalAlign.Center);
       Row()
         .width('100%')
         .height(1)
-        .margin({ left: 44 })
+        .margin({ left: entry.section === LibrarySection.BOOKMARKS ? 44 : 66 })
         .backgroundColor('#E5E5EA');
     }
       .id(`library-entry-${entry.id}`)
       .width('100%')
       .padding({ left: 8, right: 0 })
-      .backgroundColor(Color.White)
+      .backgroundColor(Color.Transparent)
       // ArkUI owns insertion/removal transitions so a delete from either
       // bookmark or history editing feels native and remains interruptible.
       .transition(
@@ -661,7 +1318,7 @@ export struct LibrarySheet {
   @Builder
   private sectionHeading(section: LibrarySection) {
     Text(this.sectionTitle(section))
-      .fontSize(13)
+      .fontSize(BROWSER_UI_TEXT_SIZE_VP)
       .fontWeight(FontWeight.Medium)
       .fontColor('#6B6B72')
       .width('100%')
@@ -670,12 +1327,22 @@ export struct LibrarySheet {
 
   @Builder
   private timelineHeading(title: string) {
-    Text(title)
-      .fontSize(13)
-      .fontWeight(FontWeight.Medium)
-      .fontColor('#6B6B72')
+    Column() {
+      Text(title)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#6B6B72')
+        .width('100%')
+        .padding({ left: 14, top: 8, bottom: 6 });
+      Row()
+        .width('100%')
+        .height(1)
+        .margin({ left: 14, right: 14 })
+        .backgroundColor('#D1D1D6');
+    }
       .width('100%')
-      .padding({ left: 14, top: 8, bottom: 6 });
+      .onAreaChange((_oldArea: Area, newArea: Area) =>
+        this.rememberHistoryHeadingHeight(`history-heading-${title}`, newArea.height as number));
   }
 
   @Builder
@@ -683,9 +1350,25 @@ export struct LibrarySheet {
     // Keep an empty history surface quiet. The sheet is a navigation surface,
     // not a toast area; no explanatory placeholder text is rendered here.
     Blank()
+      .id('library-empty-state')
+      .transition(TransitionEffect.OPACITY.animation({
+        duration: HISTORY_COLLAPSE_DURATION_MS,
+        curve: Curve.EaseOut
+      }))
+      .onTouch((event?: TouchEvent) => this.handleSearchCloseTouch(event))
       .width('100%')
       .layoutWeight(1)
-      .height('100%');
+      .height('100%')
+      .parallelGesture(
+        PanGesture({ direction: PanDirection.Vertical, distance: 8 })
+          .onActionStart(() => this.beginSearchPull())
+          .onActionUpdate((event: GestureEvent | undefined) => this.updateSearchPull(event))
+          .onActionEnd(() => this.finishSearchPull())
+          .onActionCancel(() => this.cancelSearchPull())
+      )
+      .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer,
+        _recognizers: Array<GestureRecognizer>): GestureJudgeResult =>
+        this.judgeSearchPullGesture(event, current, 'library-empty-state'));
   }
 
   private searchProgress(): number {
@@ -703,25 +1386,24 @@ export struct LibrarySheet {
         Row() {
           TextInput({
             text: this.searchQuery,
-            placeholder: placeholderForFocus('搜索书签或历史记录', this.searchInputFocused)
+            placeholder: '搜索'
           })
             .id('library-search-input')
             .width('100%')
             .height(TAB_SEARCH_BAR_STYLE.height)
             .padding({ left: TAB_SEARCH_BAR_CONTENT_INSET, right: TAB_SEARCH_BAR_CONTENT_INSET })
-            .fontSize(15)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#1D1D1F')
             .placeholderColor('#7E858B')
             .backgroundColor(Color.Transparent)
             .defaultFocus(this.searchRevealed)
-            .onFocus(() => this.searchInputFocused = true)
-            .onBlur(() => this.searchInputFocused = false)
             .onChange((value: string) => this.searchQuery = value);
         }
           .id('library-search-bar')
           .width(`calc(100% - ${TAB_SEARCH_BAR_STYLE.horizontalInset * 2}vp)`)
+          .alignSelf(ItemAlign.Center)
           .height(TAB_SEARCH_BAR_STYLE.height)
-          .margin({ left: 12, right: 12, top: 10, bottom: 6 })
+          .margin({ top: 10, bottom: 6 })
           .opacity(this.searchProgress())
           .translate({ y: -20 * (1 - this.searchProgress()) })
           .backgroundColor(TAB_SEARCH_BAR_BACKGROUND_COLOR)
@@ -736,12 +1418,12 @@ export struct LibrarySheet {
 
   @Builder
   private bookmarkContent() {
-    Scroll() {
+    Scroll(this.bookmarkScroller) {
       Column() {
         if (this.searchQuery.trim().length === 0) {
           this.bookmarkFolderRow();
         }
-        ForEach(this.filteredEntries(), (entry: LibraryEntry) => {
+        ForEach(this.filteredEntries(LibrarySection.BOOKMARKS), (entry: LibraryEntry) => {
           this.entryRow(entry);
         }, (entry: LibraryEntry) => entry.id);
       }
@@ -754,16 +1436,18 @@ export struct LibrarySheet {
         .justifyContent(FlexAlign.Start)
         .alignItems(HorizontalAlign.Start);
     }
-      .id(`library-entry-scroll-${this.section}`)
-      .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
+      .id('library-entry-scroll-bookmarks')
+      .onTouch((event?: TouchEvent) => this.handleLibraryScrollTouch(event))
+      .width(libraryListWidth(libraryContentCardWidth(this.sheetWidth())))
       .alignSelf(ItemAlign.Center)
       .layoutWeight(1)
-      .scrollBar(BarState.Off);
+      .scrollBar(BarState.Off)
+      .onScrollFrameBegin((offset: number) => this.handleLibraryScrollFrame(offset, LibrarySection.BOOKMARKS));
   }
 
   @Builder
   private listContent() {
-    Scroll() {
+    Scroll(this.historyScroller) {
       Column() {
         Repeat<string>(this.visibleHistoryItems)
           .each((item: RepeatItem<string>) => {
@@ -772,22 +1456,22 @@ export struct LibrarySheet {
           .key((item: string) => item);
       }
         .width('100%')
-        .height('100%')
         .justifyContent(FlexAlign.Start)
         .alignItems(HorizontalAlign.Start);
     }
-      .id(`library-entry-scroll-${this.section}`)
-      .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
+      .id('library-entry-scroll-history')
+      .align(Alignment.Top)
+      .onTouch((event?: TouchEvent) => this.handleLibraryScrollTouch(event))
+      .width(libraryListWidth(libraryContentCardWidth(this.sheetWidth())))
       .alignSelf(ItemAlign.Center)
       .layoutWeight(1)
-      .scrollBar(BarState.Off);
+      .scrollBar(BarState.Off)
+      .onScrollFrameBegin((offset: number) => this.handleLibraryScrollFrame(offset, LibrarySection.HISTORY));
   }
 
   @Builder
-  private content() {
-    if (this.section === LibrarySection.BOOKMARKS) {
-      this.bookmarkContent();
-    } else if (this.visibleHistoryItems.length === 0) {
+  private historyContent() {
+    if (this.visibleHistoryItems.length === 0) {
       this.emptyState();
     } else {
       this.listContent();
@@ -796,8 +1480,8 @@ export struct LibrarySheet {
 
   @Builder
   private footerSpacer() {
-    // The navigation indicator is a system-owned region. Keep the white
-    // sheet's content clear of it; the edit control is rendered independently
+    // The navigation indicator is a system-owned region. Keep the sheet's
+    // content clear of it; the edit control is rendered independently
     // as a floating action below, matching the tab overview chrome.
     Blank()
       .id('library-footer-spacer')
@@ -810,11 +1494,15 @@ export struct LibrarySheet {
     Button({ type: ButtonType.Normal, stateEffect: false }) {
       if (this.editing) {
         SymbolGlyph($r('sys.symbol.checkmark'))
-          .fontSize(22)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#007AFF']);
       } else {
         SymbolGlyph($r('sys.symbol.pencil_line'))
-          .fontSize(22)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#007AFF']);
       }
     }
@@ -840,9 +1528,8 @@ export struct LibrarySheet {
   }
 
   private safeBottomInset(): number {
-    // Keep the edit action above the gesture indicator even when the window
-    // reports its avoid area one frame late (or reports zero in Previewer).
-    return Math.max(16, this.bottomInset);
+    return safariBottomChromeUnpaintedAvoidAreaHeight(this.bottomInset) +
+      SAFARI_BOTTOM_CHROME_BOTTOM_GAP_VP;
   }
 
   private floatingEditAlignment(): Alignment {
@@ -851,10 +1538,14 @@ export struct LibrarySheet {
       : Alignment.BottomEnd;
   }
 
+  // Keep the floating button and content card corner centers aligned.
+  private floatingEditCornerInset(): number {
+    return Math.max(0, HARMONY_RADIUS_SHEET - HARMONY_RADIUS_FLOATING);
+  }
+
   private floatingEditHorizontalInset(): number {
-    return this.chromeAnchor === BrowserChromeAnchor.START
-      ? Math.max(16, this.leftInset + 16)
-      : Math.max(16, this.rightInset + 16);
+    return (this.sheetWidth() - libraryContentCardWidth(this.sheetWidth())) / 2 +
+      this.floatingEditCornerInset();
   }
 
   private sheetWidth(): number {
@@ -885,6 +1576,101 @@ export struct LibrarySheet {
     return Math.max(8, Math.min(this.topInset, 12));
   }
 
+  @Builder
+  private sheetContent() {
+    Blank()
+      .width('100%')
+      .height(this.topContentInset());
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.sectionTabShapeCanvas();
+      Row() {
+        this.sectionButton(LibrarySection.BOOKMARKS);
+        this.sectionButton(LibrarySection.HISTORY);
+      }
+        .width('100%')
+        .height(LIBRARY_TAB_HEIGHT_VP);
+    }
+      .id('library-section-tabs')
+      // Match the content card width so the selected tab reaches its side edges.
+      .width(libraryContentCardWidth(this.sheetWidth()))
+      .alignSelf(ItemAlign.Center)
+      .height(LIBRARY_TAB_HEIGHT_VP)
+      .padding(0)
+      .backgroundColor(Color.Transparent);
+
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column() {
+        this.searchBar();
+        Swiper(this.sectionSwiperController) {
+          Column() {
+            this.bookmarkContent();
+          }
+            .id('library-section-page-bookmarks')
+            .width('100%')
+            .height('100%');
+          Column() {
+            this.historyContent();
+          }
+            .id('library-section-page-history')
+            .width('100%')
+            .height('100%');
+        }
+          .id('library-section-pager')
+          .index(this.section === LibrarySection.BOOKMARKS ? 0 : 1)
+          .width('100%')
+          .layoutWeight(1)
+          .displayCount(1)
+          .itemSpace(0)
+          .indicator(false)
+          .loop(false)
+          .curve(curves.springMotion())
+          .onContentDidScroll((selectedIndex: number, index: number, position: number,
+            mainAxisLength: number) =>
+            this.onSectionSwiperScroll(selectedIndex, index, position, mainAxisLength))
+          .onChange((index: number) => this.onSectionSwiperChange(index));
+      }
+        .width('100%')
+        .height('100%');
+    }
+      .id('library-content-transition')
+      .width(libraryContentCardWidth(this.sheetWidth()))
+      .alignSelf(ItemAlign.Center)
+      .layoutWeight(1)
+      .backgroundColor(Color.White)
+      .borderRadius({
+        topLeft: this.libraryCardTopLeftRadius(),
+        topRight: this.libraryCardTopRightRadius(),
+        bottomLeft: HARMONY_RADIUS_SHEET,
+        bottomRight: HARMONY_RADIUS_SHEET
+      })
+      .clip(true);
+    this.footerSpacer();
+  }
+
+  @Builder
+  private sheetInteractionLayer() {
+    if (librarySheetPullDismissEnabled()) {
+      Column() {
+        this.sheetContent();
+      }
+        .width('100%')
+        .height('100%')
+        .parallelGesture(
+          PanGesture({ direction: PanDirection.Vertical, distance: 8 })
+            .onActionStart(() => this.beginSheetSwipe())
+            .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
+            .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
+            .onActionCancel(() => this.cancelSheetSwipe())
+        );
+    } else {
+      Column() {
+        this.sheetContent();
+      }
+        .width('100%')
+        .height('100%');
+    }
+  }
+
   build() {
     Stack() {
       Column() {
@@ -901,59 +1687,7 @@ export struct LibrarySheet {
         .onClick(() => this.onClose());
 
       Column() {
-        Blank()
-          .width('100%')
-          .height(this.topContentInset());
-        Stack({ alignContent: Alignment.TopStart }) {
-          Row()
-            .width('50%')
-            .height(24)
-            .backgroundColor(librarySectionBackground(true))
-            .borderRadius(HARMONY_RADIUS_CONTROL)
-            .translate({ x: this.sectionIndicatorOffset(), y: 0 });
-          Row() {
-            this.sectionButton(LibrarySection.BOOKMARKS);
-            this.sectionButton(LibrarySection.HISTORY);
-          }
-            .width('100%')
-            .height(24);
-        }
-          .id('library-section-tabs')
-          .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
-          .alignSelf(ItemAlign.Center)
-          .height(30)
-          .padding({ left: 2, right: 2, top: 2, bottom: 2 })
-          .backgroundColor(Color.Transparent)
-          .onAreaChange((_oldValue: Area, newValue: Area) => this.updateSectionTabsWidth(newValue));
-
-        this.searchBar();
-
-        Column() {
-          this.content();
-        }
-          .id('library-content-transition')
-          .width('100%')
-          .layoutWeight(1)
-          .opacity(0.72 + 0.28 * this.sectionTransitionProgress)
-          .translate({
-            x: this.sectionSwipeOffset + (1 - this.sectionTransitionProgress) * this.sectionSwitchDirection * 24,
-            y: 0
-          })
-          .parallelGesture(
-            PanGesture({ direction: PanDirection.Horizontal, distance: 8 })
-              .onActionStart(() => this.beginSectionSwipe())
-              .onActionUpdate((event: GestureEvent | undefined) => this.updateSectionSwipe(event))
-              .onActionEnd((event: GestureEvent | undefined) => this.finishSectionSwipe(event))
-              .onActionCancel(() => this.cancelSectionSwipe())
-          )
-          .parallelGesture(
-            PanGesture({ direction: PanDirection.Vertical, distance: 8 })
-              .onActionStart(() => this.beginSearchPull())
-              .onActionUpdate((event: GestureEvent | undefined) => this.updateSearchPull(event))
-              .onActionEnd(() => this.finishSearchPull())
-              .onActionCancel(() => this.cancelSearchPull())
-          );
-        this.footerSpacer();
+        this.sheetInteractionLayer();
       }
         .id('library-sheet')
         .width(this.sheetWidth())
@@ -967,14 +1701,7 @@ export struct LibrarySheet {
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .translate({ x: this.sheetHorizontalOffset(), y: this.sheetSwipeOffset })
-        .opacity(1 - 0.22 * libraryDismissProgress(this.sheetSwipeOffset))
-          .parallelGesture(
-            PanGesture({ direction: PanDirection.Vertical, distance: 8 })
-              .onActionStart(() => this.beginSheetSwipe())
-              .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
-              .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
-              .onActionCancel(() => this.cancelSheetSwipe())
-        );
+        .opacity(1 - 0.22 * libraryDismissProgress(this.sheetSwipeOffset));
       }
         .width('100%')
         .height('100%')
@@ -996,7 +1723,7 @@ export struct LibrarySheet {
             ? this.floatingEditHorizontalInset() : 0,
           right: this.chromeAnchor === BrowserChromeAnchor.START
             ? 0 : this.floatingEditHorizontalInset(),
-          bottom: this.safeBottomInset() + 12
+          bottom: this.safeBottomInset() + this.floatingEditCornerInset()
         })
         // The host only positions the floating pencil. It must not become a
         // full-screen hit target and steal taps from the library tabs/list.

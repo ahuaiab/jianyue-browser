@@ -1,3 +1,8 @@
+import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP
+} from '../model/BrowserVisualMetrics';
 import { PageAction, pageModeMenuLabel, pageModeMenuSymbolName } from '../model/PageActions';
 import {
   addressBarLabelFor,
@@ -76,8 +81,8 @@ export function downloadProgressRingProps(
     status: 'PROGRESSING',
     color: '#1677FF',
     buttonSize: 32,
-    lockImageSize: 20,
-    lockImageOffsetX: 6,
+    lockImageSize: BROWSER_UI_ICON_SIZE_VP,
+    lockImageOffsetX: 4,
     size: 28,
     ringOffset: 2,
     strokeWidth: 2
@@ -303,7 +308,7 @@ export struct AddressSearchBar {
       ? $r('sys.symbol.rectangle_portrait')
       : $r('sys.symbol.display');
     return new SymbolGlyphModifier(symbolResource)
-      .fontSize('20vp')
+      .fontSize('24vp')
       .fontColor(['#1D1D1F']);
   }
 
@@ -405,11 +410,14 @@ export struct AddressSearchBar {
               Button({ type: ButtonType.Normal, stateEffect: false }) {
                 Stack({ alignContent: Alignment.Center }) {
                   Text('×')
-                    .fontSize(22)
+                    .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+                    .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+                    .fontSize(BROWSER_UI_ICON_SIZE_VP)
+                    .textAlign(TextAlign.Center)
                     .fontColor('#6B7280');
                 }
-                  .width(32)
-                  .height(32);
+                  .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+                  .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP);
               }
                 .id('browser-address-clear-button')
                 .width(32)
@@ -444,7 +452,7 @@ export struct AddressSearchBar {
             // recognizers that otherwise win a horizontal drag and expose
             // selection handles instead of forwarding the tab transition.
             .hitTestBehavior(this.addressInputFocused ? HitTestMode.Default : HitTestMode.None)
-            .fontSize(16)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor(addressTextColorFor(true))
             .placeholderColor(addressTextColorFor(false))
             .textAlign(addressTextAlignmentFor(this.editorActive) === 'start'
@@ -490,7 +498,7 @@ export struct AddressSearchBar {
               .height(44)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .fontSize(16)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor(addressTextColorFor(this.visibleAddress().length > 0))
               .textAlign(TextAlign.Center)
               .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))
@@ -506,7 +514,7 @@ export struct AddressSearchBar {
               .height(44)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .fontSize(16)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor(addressTextColorFor(this.visibleAddress().length > 0))
               .textAlign(TextAlign.Center)
               .textSelectable(TextSelectableMode.UNSELECTABLE)

@@ -8,11 +8,22 @@
 **/.idea/
 **/.codex/
 **/.test/
+**/.hvigor-*/
+**/.test-*/
 
 # Local investigation and verification artifacts
 artifacts/
 diagnosis/
 docs/superpowers/
+verification/
+screenshots/
+/runtime-*
+/app/runtime-*
+/app/browser-buttons-*.png
+/app/history-icon-*.png
+/app/library-*.png
+/app/smart-reach-*.png
+/deveco-scroll-doc.txt
 
 # Build and signing artifacts
 hap/
@@ -33,3 +44,4 @@ o.timestamp
 x.width
 console.log(i+301+'
 x+1).join('
+/(i+3581)+'

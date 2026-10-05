@@ -10,7 +10,11 @@ import {
 import { GestureDecisionEngine } from '../gesture/GestureDecisionEngine';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
 import { TabStore } from '../store/TabStore';
-import { HARMONY_RADIUS_FLOATING, HARMONY_RADIUS_SHEET } from '../model/BrowserVisualMetrics';
+import {
+  BROWSER_UI_TEXT_SIZE_VP,
+  HARMONY_RADIUS_FLOATING,
+  HARMONY_RADIUS_SHEET
+} from '../model/BrowserVisualMetrics';
 
 /**
  * 手势实验页验收清单：
@@ -217,11 +221,11 @@ export struct GestureLab {
   private buildTabCard(tab: BrowserTabRecord) {
     Column() {
       Text(tab.title)
-        .fontSize(18)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor(Color.White)
         .maxLines(1)
       Text(tab.url)
-        .fontSize(12)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#EAF2FF')
         .maxLines(1)
         .margin({ top: 8 })
@@ -258,22 +262,22 @@ export struct GestureLab {
         .id('gesture-debug-strip')
         .width('100%')
         .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-        .fontSize(12)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#334155')
         .backgroundColor('#E2E8F0')
 
       Stack() {
         Column() {
           Text(this.activeTitle())
-            .fontSize(28)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontWeight(FontWeight.Bold)
             .fontColor(Color.White)
           Text(this.activeUrl())
-            .fontSize(14)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#F8FAFC')
             .margin({ top: 12 })
           Text('ArkUI 原生手势实验页')
-            .fontSize(13)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#F8FAFC')
             .margin({ top: 28 })
         }
@@ -314,12 +318,12 @@ export struct GestureLab {
 
       Row() {
         Text(`简悦 · ${this.store.tabs.length} 个标签`)
-          .fontSize(14)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor(Color.White)
           .layoutWeight(1)
         Button() {
           Text('总览')
-            .fontSize(14)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         }
         .height(40)
         .onClick(() => this.animateBottomTo(1))

@@ -1,5 +1,9 @@
 import { BrowserTabRecord } from './BrowserTypes';
-import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_CONTROL } from './BrowserVisualMetrics';
+import {
+  browserChromeLayoutFrame,
+  HARMONY_RADIUS_CARD,
+  HARMONY_RADIUS_CONTROL
+} from './BrowserVisualMetrics';
 
 /** Shared visual metrics for the Safari-like tab overview and its cards. */
 export interface TabOverviewLayoutMetrics {
@@ -116,7 +120,7 @@ export const TAB_OVERVIEW_BORDER_HANDOFF_PROGRESS: number = 0.98;
 export const TAB_OVERVIEW_CAPTION_HEIGHT: number = 32;
 
 /** Compact title size shared by the settled card and the live transition label. */
-export const TAB_OVERVIEW_CAPTION_FONT_SIZE: number = 10;
+export const TAB_OVERVIEW_CAPTION_FONT_SIZE: number = 16;
 
 /** Finish revealing the live label while the page is still close to full size. */
 export const TAB_OVERVIEW_CAPTION_FADE_IN_END_PROGRESS: number = 0.22;
@@ -181,10 +185,33 @@ export function tabOverviewCardTopForProgress(topInset: number, progress: number
     tabOverviewTopPaddingForProgress(topInset, progress);
 }
 
-/** Calculate one card's width from the two-column grid's measured viewport. */
-export function tabOverviewCardWidth(viewportWidth: number): number {
+/** Fixed phone grid, centered inside the horizontal safe region. */
+export function tabOverviewGridWidth(
+  viewportWidth: number,
+  leftAvoidInset: number = 0,
+  rightAvoidInset: number = 0
+): number {
+  return browserChromeLayoutFrame(viewportWidth, leftAvoidInset, rightAvoidInset).width;
+}
+
+export function tabOverviewGridLeft(
+  viewportWidth: number,
+  leftAvoidInset: number = 0,
+  rightAvoidInset: number = 0
+): number {
+  return browserChromeLayoutFrame(viewportWidth, leftAvoidInset, rightAvoidInset).left;
+}
+
+/** Calculate one card from the same fixed grid used by the overview and live transition. */
+export function tabOverviewCardWidth(
+  viewportWidth: number,
+  leftAvoidInset: number = 0,
+  rightAvoidInset: number = 0
+): number {
   const available: number = Math.max(0,
-    viewportWidth - TAB_OVERVIEW_LAYOUT.horizontalPadding * 2 - TAB_OVERVIEW_LAYOUT.gap);
+    tabOverviewGridWidth(viewportWidth, leftAvoidInset, rightAvoidInset) -
+    TAB_OVERVIEW_LAYOUT.horizontalPadding * 2 -
+    TAB_OVERVIEW_LAYOUT.gap);
   return Math.max(1, available / TAB_OVERVIEW_LAYOUT.columns);
 }
 
@@ -1010,7 +1037,9 @@ export function tabOverviewPageFrame(
   activeIndex: number,
   topInset: number,
   searchProgress: number = 0,
-  activeCardScrollOffset: number = 0
+  activeCardScrollOffset: number = 0,
+  leftAvoidInset: number = 0,
+  rightAvoidInset: number = 0
 ): TabOverviewPageFrame {
   const identity: TabOverviewPageFrame = {
     transitionProgress: 0,
@@ -1035,11 +1064,12 @@ export function tabOverviewPageFrame(
   }
 
   const clampedProgress: number = clampOverviewProgress(progress);
-  const cardWidth: number = tabOverviewCardWidth(viewportWidth);
+  const cardWidth: number = tabOverviewCardWidth(viewportWidth, leftAvoidInset, rightAvoidInset);
   const cardHeight: number = TAB_OVERVIEW_LAYOUT.cardHeight;
   const column: number = activeIndex % TAB_OVERVIEW_LAYOUT.columns;
   const row: number = Math.floor(activeIndex / TAB_OVERVIEW_LAYOUT.columns);
-  const targetLeft: number = TAB_OVERVIEW_LAYOUT.horizontalPadding +
+  const targetLeft: number = tabOverviewGridLeft(viewportWidth, leftAvoidInset, rightAvoidInset) +
+    TAB_OVERVIEW_LAYOUT.horizontalPadding +
     column * (cardWidth + TAB_OVERVIEW_LAYOUT.gap);
   const targetTop: number = tabOverviewCardTopForProgress(topInset, searchProgress) +
     row * (cardHeight + TAB_OVERVIEW_LAYOUT.gap) -

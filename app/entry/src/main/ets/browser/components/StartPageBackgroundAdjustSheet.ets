@@ -5,7 +5,16 @@ import {
   normalizeStartPageBackgroundScale,
   StartPageBackgroundPosition
 } from '../model/BrowserSettings';
-import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_SHEET } from '../model/BrowserVisualMetrics';
+import {
+  browserChromeLayoutFrame,
+  browserFixedWidth,
+  BACKGROUND_ADJUST_SHEET_DESIGN_WIDTH_VP,
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP,
+  HARMONY_RADIUS_CARD,
+  HARMONY_RADIUS_SHEET
+} from '../model/BrowserVisualMetrics';
 
 /** Full-screen bottom sheet shown after a photo is selected for the start page. */
 @ComponentV2
@@ -15,6 +24,9 @@ export struct StartPageBackgroundAdjustSheet {
   @Param backgroundScale: number = DEFAULT_START_PAGE_BACKGROUND_SCALE;
   @Param pageViewportWidth: number = 1;
   @Param pageViewportHeight: number = 1;
+  @Param viewportWidth: number = 400;
+  @Param leftInset: number = 0;
+  @Param rightInset: number = 0;
   @Param topInset: number = 0;
   @Param bottomInset: number = 0;
   @Param onPositionChange: (position: StartPageBackgroundPosition) => void =
@@ -26,6 +38,21 @@ export struct StartPageBackgroundAdjustSheet {
   @Param onSelectAnother: () => void = () => undefined;
   @Local previewWidth: number = 0;
   @Local previewHeight: number = 0;
+
+  private sheetWidth(): number {
+    return browserFixedWidth(
+      browserChromeLayoutFrame(this.viewportWidth, this.leftInset, this.rightInset).width,
+      BACKGROUND_ADJUST_SHEET_DESIGN_WIDTH_VP
+    );
+  }
+
+  private sheetHorizontalOffset(): number {
+    const safeViewportWidth: number = Number.isFinite(this.viewportWidth) && this.viewportWidth > 0
+      ? this.viewportWidth
+      : 1;
+    const frame = browserChromeLayoutFrame(safeViewportWidth, this.leftInset, this.rightInset);
+    return frame.left - (safeViewportWidth - frame.width) / 2;
+  }
 
   private pageAspectRatio(): number {
     const width: number = Number.isFinite(this.pageViewportWidth) && this.pageViewportWidth > 0
@@ -71,7 +98,9 @@ export struct StartPageBackgroundAdjustSheet {
     Row() {
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(18)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#6B7280']);
       }
         .id('start-page-background-adjust-cancel')
@@ -82,7 +111,7 @@ export struct StartPageBackgroundAdjustSheet {
         .onClick(() => this.onCancel());
 
       Text('调整背景')
-        .fontSize(17)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontWeight(FontWeight.Bold)
         .fontColor('#1D1D1F')
         .layoutWeight(1)
@@ -93,7 +122,7 @@ export struct StartPageBackgroundAdjustSheet {
         .width(64)
         .height(40)
         .padding(0)
-        .fontSize(15)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#007AFF')
         .backgroundColor(Color.Transparent)
         .onClick(() => this.onComplete(
@@ -114,7 +143,7 @@ export struct StartPageBackgroundAdjustSheet {
         .id('start-page-background-adjust-reset')
         .layoutWeight(1)
         .height(44)
-        .fontSize(15)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#1D1D1F')
         .backgroundColor('#F2F2F7')
         .borderRadius(HARMONY_RADIUS_CARD)
@@ -123,7 +152,7 @@ export struct StartPageBackgroundAdjustSheet {
         .id('start-page-background-adjust-select')
         .layoutWeight(1)
         .height(44)
-        .fontSize(15)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#007AFF')
         .backgroundColor('#F2F2F7')
         .borderRadius(HARMONY_RADIUS_CARD)
@@ -161,7 +190,7 @@ export struct StartPageBackgroundAdjustSheet {
               .height('100%');
             Text('拖动或双指缩放')
               .id('start-page-background-adjust-hint')
-              .fontSize(13)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor(Color.White)
               .backgroundColor('#88000000')
               .borderRadius(16)
@@ -193,12 +222,14 @@ export struct StartPageBackgroundAdjustSheet {
           .height(Math.max(0, this.bottomInset));
       }
         .id('start-page-background-adjust-sheet')
-        .width('100%')
+        .width(this.sheetWidth())
+        .alignSelf(ItemAlign.Center)
         .height('72%')
         .backgroundColor(Color.White)
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
         .shadow({ radius: 18, color: '#55000000', offsetX: 0, offsetY: -4 })
         .clip(true)
+        .translate({ x: this.sheetHorizontalOffset(), y: 0, z: 0 })
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
     }
       .id('start-page-background-adjust-overlay')

@@ -1,12 +1,21 @@
 import { curves } from '@kit.ArkUI';
 import { DownloadBackend, DownloadStatus, DownloadTaskRecord } from '../model/DownloadModels';
 import {
+  BrowserChromeAnchor,
+  browserChromeLayoutFrame,
+  browserFixedWidth,
+  DOWNLOAD_CONTENT_DESIGN_WIDTH_VP,
+  DOWNLOAD_SHEET_DESIGN_WIDTH_VP,
   HARMONY_RADIUS_CARD,
   HARMONY_RADIUS_COMPACT,
   HARMONY_RADIUS_SHEET,
-  LIBRARY_CONTENT_WIDTH_PERCENT
 } from '../model/BrowserVisualMetrics';
 import { LIBRARY_SHEET_HEIGHT_PERCENT } from '../model/LibraryModels';
+import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP
+} from '../model/BrowserVisualMetrics';
 
 export enum DownloadManagerActionKind {
   NONE = 'none',
@@ -77,6 +86,10 @@ export struct DownloadManagerSheet {
   @Param tasks: DownloadTaskRecord[] = [];
   @Param topInset: number = 0;
   @Param bottomInset: number = 0;
+  @Param viewportWidth: number = 400;
+  @Param leftInset: number = 0;
+  @Param rightInset: number = 0;
+  @Param chromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
   @Param onClose: () => void = () => undefined;
   @Param onPause: (id: string) => void = (_id: string) => undefined;
   @Param onResume: (id: string) => void = (_id: string) => undefined;
@@ -93,6 +106,31 @@ export struct DownloadManagerSheet {
 
   private topContentInset(): number {
     return Math.max(8, Math.min(this.topInset, 12));
+  }
+
+  private sheetWidth(): number {
+    return browserFixedWidth(
+      browserChromeLayoutFrame(
+        this.viewportWidth,
+        this.leftInset,
+        this.rightInset,
+        this.chromeAnchor
+      ).width,
+      DOWNLOAD_SHEET_DESIGN_WIDTH_VP
+    );
+  }
+
+  private sheetHorizontalOffset(): number {
+    const safeViewportWidth: number = Number.isFinite(this.viewportWidth) && this.viewportWidth > 0
+      ? this.viewportWidth
+      : 1;
+    const frame = browserChromeLayoutFrame(
+      safeViewportWidth,
+      this.leftInset,
+      this.rightInset,
+      this.chromeAnchor
+    );
+    return frame.left - (safeViewportWidth - frame.width) / 2;
   }
 
   private beginSheetSwipe(): void {
@@ -151,7 +189,7 @@ export struct DownloadManagerSheet {
   private actionButton(id: string, label: string, onClick: () => void) {
     Button({ type: ButtonType.Normal, stateEffect: false }) {
       Text(label)
-        .fontSize(13)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#007AFF');
     }
       .id(id)
@@ -189,7 +227,10 @@ export struct DownloadManagerSheet {
       Row({ space: 10 }) {
         Stack({ alignContent: Alignment.Center }) {
           Text(task.status === DownloadStatus.COMPLETED ? '✓' : '↓')
-            .fontSize(20)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .textAlign(TextAlign.Center)
             .fontColor(task.status === DownloadStatus.FAILED ? '#FF3B30' : '#007AFF');
         }
           .width(32)
@@ -198,21 +239,21 @@ export struct DownloadManagerSheet {
           .borderRadius(HARMONY_RADIUS_COMPACT);
         Column({ space: 3 }) {
           Text(task.filename.length > 0 ? task.filename : '下载文件')
-            .fontSize(15)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor('#1D1D1F')
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%');
           if (downloadManagerSubtitleLabel(task.status).length > 0) {
             Text(downloadManagerSubtitleLabel(task.status))
-              .fontSize(12)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor(task.status === DownloadStatus.FAILED ? '#FF3B30' : '#6B7280');
           }
         }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start);
         Text(downloadManagerProgressLabel(task))
-          .fontSize(14)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontWeight(FontWeight.Medium)
           .fontColor('#1D1D1F');
       }
@@ -233,7 +274,7 @@ export struct DownloadManagerSheet {
 
       if (downloadManagerDetailLabel(task).length > 0) {
         Text(downloadManagerDetailLabel(task))
-          .fontSize(12)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor('#8A8A90')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -254,11 +295,11 @@ export struct DownloadManagerSheet {
   private emptyState() {
     Column({ space: 8 }) {
       Text('暂无下载')
-        .fontSize(18)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontWeight(FontWeight.Medium)
         .fontColor('#1D1D1F');
       Text('网页下载完成后会显示在这里')
-        .fontSize(14)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#8A8A90');
     }
       .id('download-manager-empty-state')
@@ -286,14 +327,14 @@ export struct DownloadManagerSheet {
           .height(this.topContentInset());
         Row() {
           Text('下载管理')
-            .fontSize(20)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontWeight(FontWeight.Bold)
             .fontColor('#1D1D1F')
             .width('100%')
             .textAlign(TextAlign.Center);
         }
           .id('download-manager-header')
-          .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
+          .width(browserFixedWidth(this.sheetWidth(), DOWNLOAD_CONTENT_DESIGN_WIDTH_VP))
           .alignSelf(ItemAlign.Center)
           .height(52)
           .padding({ left: 0, right: 0 });
@@ -313,7 +354,7 @@ export struct DownloadManagerSheet {
               .alignItems(HorizontalAlign.Start);
           }
             .id('download-manager-task-scroll')
-            .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
+            .width(browserFixedWidth(this.sheetWidth(), DOWNLOAD_CONTENT_DESIGN_WIDTH_VP))
             .alignSelf(ItemAlign.Center)
             .layoutWeight(1)
             .scrollBar(BarState.Off);
@@ -325,14 +366,15 @@ export struct DownloadManagerSheet {
           .height(this.safeBottomInset());
       }
         .id('download-manager-sheet')
-        .width('100%')
+        .width(this.sheetWidth())
+        .alignSelf(ItemAlign.Center)
         .height(`${LIBRARY_SHEET_HEIGHT_PERCENT}%`)
         .backgroundColor(Color.White)
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
         .shadow({ radius: 12, color: '#55000000', offsetX: 0, offsetY: -3 })
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .translate({ x: 0, y: this.sheetSwipeOffset })
+        .translate({ x: this.sheetHorizontalOffset(), y: this.sheetSwipeOffset })
         .opacity(1 - Math.min(0.22, this.sheetSwipeOffset / 240 * 0.22))
         .parallelGesture(
           PanGesture({ direction: PanDirection.Vertical, distance: 8 })

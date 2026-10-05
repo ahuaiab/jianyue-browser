@@ -101,6 +101,15 @@ export default function browserRepositoryTest() {
       expect(store.allValues().join('').includes('https://normal.example')).assertFalse();
     });
 
+    it('does not restore tabs saved by a previous app process', 0, async () => {
+      const repository: BrowserRepository = new BrowserRepository(new FakeKeyValueStore());
+      await repository.saveSession(normalSession());
+
+      await repository.clearSessionForColdStart();
+
+      expect(await repository.loadSession()).assertUndefined();
+    });
+
     it('serializes an exit clear after an in-flight session save', 0, async () => {
       const store: ExitRaceKeyValueStore = new ExitRaceKeyValueStore();
       const repository: BrowserRepository = new BrowserRepository(store);

@@ -1,14 +1,23 @@
 import { image } from '@kit.ImageKit';
+import { PageIconFileStorePort } from './PageIconFallbackFetcher';
+import {
+  PageIconDiagnostics,
+  PageIconDiagnosticStage,
+  PageIconFailureCategory
+} from '../model/PageIconDiagnostics';
+import { ensurePageIconDirectory } from './PageIconDirectory';
 import fs from '@ohos.file.fs';
 
 const PAGE_ICON_DIRECTORY: string = 'page-icons';
 
 /** Stores ArkWeb PixelMaps as small local PNGs so library pages never fetch favicons on startup. */
-export class PageIconFileStore {
+export class PageIconFileStore implements PageIconFileStorePort {
   private readonly directory: string;
+  private readonly diagnostics: PageIconDiagnostics | undefined;
 
-  constructor(filesDir: string) {
+  constructor(filesDir: string, diagnostics?: PageIconDiagnostics) {
     this.directory = `${filesDir}/${PAGE_ICON_DIRECTORY}`;
+    this.diagnostics = diagnostics;
   }
 
   async save(url: string, pixelMap: image.PixelMap): Promise<string | undefined> {
@@ -19,16 +28,32 @@ export class PageIconFileStore {
     const path: string = this.pathFor(normalizedUrl);
     let file: fs.File | undefined;
     let packer: image.ImagePacker | undefined;
+    let failureCategory: PageIconFailureCategory = PageIconFailureCategory.FILE_DIRECTORY_FAILED;
     try {
-      fs.mkdirSync(this.directory, true);
+      ensurePageIconDirectory(
+        (): boolean => fs.statSync(this.directory).isDirectory(),
+        (): void => fs.mkdirSync(this.directory, true)
+      );
+      failureCategory = PageIconFailureCategory.FILE_OPEN_FAILED;
       file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      failureCategory = PageIconFailureCategory.IMAGE_PACKER_CREATE_FAILED;
       packer = image.createImagePacker();
+      failureCategory = PageIconFailureCategory.IMAGE_PACK_FAILED;
       await packer.packToFile(pixelMap, file.fd, {
         format: 'image/png',
         quality: 100
       });
       return path;
     } catch (_error) {
+      const errorDetails: Record<string, Object> = _error as Record<string, Object>;
+      const rawCode: Object = errorDetails['code'];
+      const errorCode: number | undefined = typeof rawCode === 'number' ? rawCode : undefined;
+      this.diagnostics?.record(
+        PageIconDiagnosticStage.FILE_WRITE,
+        normalizedUrl,
+        failureCategory,
+        errorCode
+      );
       return undefined;
     } finally {
       if (packer !== undefined) {

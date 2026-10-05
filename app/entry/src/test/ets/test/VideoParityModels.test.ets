@@ -93,9 +93,7 @@ import {
   historyTimelineSection,
   LIBRARY_DISMISS_THRESHOLD,
   LIBRARY_SEARCH_PULL_THRESHOLD,
-  LIBRARY_SECTION_SELECTED_BACKGROUND,
   LIBRARY_SECTION_SWIPE_THRESHOLD,
-  LIBRARY_SECTION_UNSELECTED_BACKGROUND,
   LIBRARY_SHEET_HEIGHT_PERCENT,
   libraryBookmarkActionEnabled,
   libraryDismissProgress,
@@ -103,11 +101,16 @@ import {
   libraryEntries,
   libraryEntryRenderKey,
   librarySearchPullProgress,
+  librarySearchPullShouldCaptureGesture,
+  librarySearchScrollFrame,
+  librarySearchSwipeShouldClose,
+  librarySearchSwipeReleaseOffset,
+  librarySearchSwipePullOffset,
+  librarySheetPullDismissEnabled,
   LibrarySection,
   librarySectionAfterSwipe,
-  librarySectionBackground,
   librarySectionChrome,
-  librarySectionIndicatorOffset,
+  librarySectionIconColor,
   visibleHistoryRecords
 } from '../../../main/ets/browser/model/LibraryModels';
 import {
@@ -666,6 +669,11 @@ export default function videoParityModelsTest() {
       expect(librarySectionChrome(LibrarySection.HISTORY).symbolName).assertEqual('clock');
     });
 
+    it('assigns blue only to the currently selected library icon', 0, () => {
+      expect(librarySectionIconColor(true)).assertEqual('#007AFF');
+      expect(librarySectionIconColor(false)).assertEqual('#AAB2BD');
+    });
+
     it('defines the bookmark button long-press menu action', 0, () => {
       expect(JSON.stringify(librarySectionChrome(LibrarySection.BOOKMARKS)).includes('添加书签')).assertTrue();
     });
@@ -687,19 +695,6 @@ export default function videoParityModelsTest() {
         .assertEqual(LibrarySection.BOOKMARKS);
       expect(librarySectionAfterSwipe(LibrarySection.HISTORY, 47))
         .assertEqual(LibrarySection.HISTORY);
-    });
-
-    it('uses a gray selected library segment without a separate track', 0, () => {
-      expect(LIBRARY_SECTION_SELECTED_BACKGROUND).assertEqual('#D1D1D6');
-      expect(LIBRARY_SECTION_UNSELECTED_BACKGROUND).assertEqual('#FFFFFF');
-      expect(librarySectionBackground(true)).assertEqual(LIBRARY_SECTION_SELECTED_BACKGROUND);
-      expect(librarySectionBackground(false)).assertEqual(LIBRARY_SECTION_UNSELECTED_BACKGROUND);
-    });
-
-    it('moves one library selection indicator instead of crossfading two segment surfaces', 0, () => {
-      expect(librarySectionIndicatorOffset(LibrarySection.BOOKMARKS, 120)).assertEqual(0);
-      expect(librarySectionIndicatorOffset(LibrarySection.HISTORY, 120)).assertEqual(120);
-      expect(librarySectionIndicatorOffset(LibrarySection.HISTORY, -20)).assertEqual(0);
     });
 
     it('applies interruptible resistance before dismissing the library sheet', 0, () => {
@@ -725,30 +720,46 @@ export default function videoParityModelsTest() {
       expect(entries.length).assertEqual(3);
     });
 
-    it('groups history by local today, yesterday, week and earlier boundaries', 0, () => {
-      const wednesdayMorning: Date = new Date(2026, 8, 9, 10, 0, 0, 0);
-      const now: number = wednesdayMorning.getTime();
-      const today: number = new Date(2026, 8, 9, 9, 0, 0, 0).getTime();
-      const yesterday: number = new Date(2026, 8, 8, 23, 59, 59, 999).getTime();
+    it('groups history by local calendar day and shows each date in its heading', 0, () => {
+      const now: number = new Date(2026, 8, 10, 10, 0, 0, 0).getTime();
+      const today: number = new Date(2026, 8, 10, 9, 0, 0, 0).getTime();
+      const yesterday: number = new Date(2026, 8, 9, 23, 59, 59, 999).getTime();
+      const tuesday: number = new Date(2026, 8, 8, 12, 0, 0, 0).getTime();
       const monday: number = new Date(2026, 8, 7, 12, 0, 0, 0).getTime();
       const lastWeek: number = new Date(2026, 8, 6, 23, 59, 59, 999).getTime();
       expect(historyTimelineSection(today, now)).assertEqual(HistoryTimelineSection.TODAY);
       expect(historyTimelineSection(yesterday, now)).assertEqual(HistoryTimelineSection.YESTERDAY);
+      expect(historyTimelineSection(tuesday, now)).assertEqual(HistoryTimelineSection.THIS_WEEK);
       expect(historyTimelineSection(monday, now)).assertEqual(HistoryTimelineSection.THIS_WEEK);
       expect(historyTimelineSection(lastWeek, now)).assertEqual(HistoryTimelineSection.EARLIER);
 
       const groups = historyTimelineGroups([
+        { url: 'https://monday.example', title: 'Monday', visitedAt: monday },
         { url: 'https://today.example', title: 'Today', visitedAt: today },
         { url: 'https://yesterday.example', title: 'Yesterday', visitedAt: yesterday },
-        { url: 'https://monday.example', title: 'Monday', visitedAt: monday },
+        { url: 'https://tuesday.example', title: 'Tuesday', visitedAt: tuesday },
         { url: 'https://last-week.example', title: 'Last week', visitedAt: lastWeek }
       ], now);
-      expect(groups.length).assertEqual(4);
-      expect(groups[0].title).assertEqual('今天');
-      expect(groups[1].title).assertEqual('昨天');
-      expect(groups[2].title).assertEqual('本周');
-      expect(groups[3].title).assertEqual('更早');
-      expect(groups[2].entries[0].url).assertEqual('https://monday.example');
+      expect(groups.length).assertEqual(5);
+      expect(groups[0].title).assertEqual('今天 - 2026年9月10日星期四');
+      expect(groups[1].title).assertEqual('昨天 - 2026年9月9日星期三');
+      expect(groups[2].title).assertEqual('2026年9月8日星期二');
+      expect(groups[3].title).assertEqual('2026年9月7日星期一');
+      expect(groups[4].title).assertEqual('2026年9月6日星期日');
+      expect(groups[0].entries[0].url).assertEqual('https://today.example');
+      expect(groups[2].entries[0].url).assertEqual('https://tuesday.example');
+    });
+
+    it('includes a compact local time and host-only URL for history rows', 0, () => {
+      const visitedAt: number = new Date(2026, 8, 10, 7, 5, 0, 0).getTime();
+      const groups = historyTimelineGroups([{
+        url: 'https://www.google.com/search?q=ark',
+        title: 'Google Search',
+        visitedAt
+      }], visitedAt);
+      const serializedEntry: string = JSON.stringify(groups[0].entries[0]);
+      expect(serializedEntry.indexOf('"timeText":"07:05"') >= 0).assertEqual(true);
+      expect(serializedEntry.indexOf('"shortUrl":"google.com"') >= 0).assertEqual(true);
     });
 
     it('keeps a history row key stable when another row is removed', 0, () => {
@@ -811,6 +822,78 @@ export default function videoParityModelsTest() {
       expect(librarySearchPullProgress(0)).assertEqual(0);
       expect(librarySearchPullProgress(LIBRARY_SEARCH_PULL_THRESHOLD / 2)).assertEqual(0.5);
       expect(librarySearchPullProgress(LIBRARY_SEARCH_PULL_THRESHOLD)).assertEqual(1);
+    });
+
+    it('reveals search only at the list top and closes it on an upward drag', 0, () => {
+      expect(librarySearchPullShouldCaptureGesture(0, 24)).assertTrue();
+      expect(librarySearchPullShouldCaptureGesture(36, 24)).assertFalse();
+      expect(librarySearchPullShouldCaptureGesture(0, -24)).assertFalse();
+      expect(librarySearchPullShouldCaptureGesture(0, -24, true)).assertTrue();
+      expect(librarySearchPullShouldCaptureGesture(36, -24, true)).assertTrue();
+      expect(librarySearchPullShouldCaptureGesture(Number.NaN, 24)).assertFalse();
+      expect(librarySearchPullShouldCaptureGesture(Number.NaN, -24, true)).assertTrue();
+    });
+
+    it('closes the library search after a vertical upward touch', 0, () => {
+      expect(librarySearchSwipeShouldClose(0, -36, true)).assertTrue();
+      expect(librarySearchSwipeShouldClose(-10, -40, true)).assertTrue();
+      expect(librarySearchSwipeShouldClose(0, -35, true)).assertFalse();
+      expect(librarySearchSwipeShouldClose(-70, -60, true)).assertFalse();
+      expect(librarySearchSwipeShouldClose(0, 60, true)).assertFalse();
+      expect(librarySearchSwipeShouldClose(0, -80, false)).assertFalse();
+      expect(librarySearchSwipeShouldClose(Number.NaN, -80, true)).assertFalse();
+    });
+
+    it('compresses the library search slot in sync with vertical touch travel', 0, () => {
+      expect(librarySearchSwipePullOffset(72, 0, -18)).assertEqual(54);
+      expect(librarySearchSwipePullOffset(72, 0, -36)).assertEqual(36);
+      expect(librarySearchSwipePullOffset(72, 0, -72)).assertEqual(0);
+      expect(librarySearchSwipePullOffset(54, 0, 12)).assertEqual(66);
+      expect(librarySearchSwipePullOffset(72, 30, -10)).assertEqual(72);
+      expect(librarySearchSwipePullOffset(72, 10, -10)).assertEqual(72);
+      expect(librarySearchSwipePullOffset(90, 0, -12)).assertEqual(60);
+    });
+
+    it('keeps partial search compression across short upward swipes', 0, () => {
+      expect(librarySearchSwipeReleaseOffset(54, 0, -18, true)).assertEqual(54);
+      expect(librarySearchSwipeReleaseOffset(0, 0, -8, true)).assertEqual(0);
+      expect(librarySearchSwipeReleaseOffset(72, 8, -8, true)).assertEqual(72);
+    });
+
+    it('compresses the search slot before forwarding upward scroll to history', 0, () => {
+      const compressing = librarySearchScrollFrame(24, 72, 0, false);
+      expect(compressing.searchOffset).assertEqual(48);
+      expect(compressing.offsetRemain).assertEqual(0);
+
+      const handoff = librarySearchScrollFrame(24, 12, 0, false);
+      expect(handoff.searchOffset).assertEqual(0);
+      expect(handoff.offsetRemain).assertEqual(12);
+
+      const searchHidden = librarySearchScrollFrame(24, 0, 0, false);
+      expect(searchHidden.searchOffset).assertEqual(0);
+      expect(searchHidden.offsetRemain).assertEqual(24);
+    });
+
+    it('reveals the search slot only when downward scroll is at the list top', 0, () => {
+      const reveal = librarySearchScrollFrame(-18, 0, 0, true);
+      expect(reveal.searchOffset).assertEqual(18);
+      expect(reveal.offsetRemain).assertEqual(0);
+
+      const cappedReveal = librarySearchScrollFrame(-18, 60, 0, true);
+      expect(cappedReveal.searchOffset).assertEqual(72);
+      expect(cappedReveal.offsetRemain).assertEqual(0);
+
+      const listScroll = librarySearchScrollFrame(-18, 0, 18, true);
+      expect(listScroll.searchOffset).assertEqual(0);
+      expect(listScroll.offsetRemain).assertEqual(-18);
+
+      const topHandoff = librarySearchScrollFrame(-30, 0, 12, true);
+      expect(topHandoff.searchOffset).assertEqual(18);
+      expect(topHandoff.offsetRemain).assertEqual(-12);
+    });
+
+    it('keeps the library sheet open during pulls on both sections', 0, () => {
+      expect(librarySheetPullDismissEnabled()).assertFalse();
     });
 
     it('blocks ArkWeb hit testing while the native start page overlays a blank tab', 0, () => {
@@ -967,17 +1050,17 @@ export default function videoParityModelsTest() {
       expect(SAFARI_ADDRESS_HANDOFF_CROSSFADE_DURATION_MS).assertEqual(420);
       expect(SAFARI_BOTTOM_CHROME_RAIL_INSET_VP).assertEqual(20);
 
-      const viewportWidth: number = 400;
-      expect(safariBottomChromeSurfaceWidth(viewportWidth)).assertEqual(384);
-      expect(safariAddressItemWidth(viewportWidth)).assertEqual(368);
+      const viewportWidth: number = 366;
+      expect(safariBottomChromeSurfaceWidth(viewportWidth)).assertEqual(350);
+      expect(safariAddressItemWidth(viewportWidth)).assertEqual(334);
       expect(safariAddressItemWidth(364)).assertEqual(332);
-      expect(safariBottomChromeRailWidth(viewportWidth)).assertEqual(344);
-      expect(safariBottomChromeActionSlotWidth(viewportWidth).toFixed(1)).assertEqual('68.8');
-      expect(safariBottomChromeActionCenter(0, viewportWidth).toFixed(1)).assertEqual('62.4');
-      expect(safariBottomChromeActionCenter(1, viewportWidth).toFixed(1)).assertEqual('131.2');
-      expect(safariBottomChromeActionCenter(2, viewportWidth).toFixed(1)).assertEqual('200.0');
-      expect(safariBottomChromeActionCenter(3, viewportWidth).toFixed(1)).assertEqual('268.8');
-      expect(safariBottomChromeActionCenter(4, viewportWidth).toFixed(1)).assertEqual('337.6');
+      expect(safariBottomChromeRailWidth(viewportWidth)).assertEqual(310);
+      expect(safariBottomChromeActionSlotWidth(viewportWidth).toFixed(1)).assertEqual('62.0');
+      expect(safariBottomChromeActionCenter(0, viewportWidth).toFixed(1)).assertEqual('59.0');
+      expect(safariBottomChromeActionCenter(1, viewportWidth).toFixed(1)).assertEqual('121.0');
+      expect(safariBottomChromeActionCenter(2, viewportWidth).toFixed(1)).assertEqual('183.0');
+      expect(safariBottomChromeActionCenter(3, viewportWidth).toFixed(1)).assertEqual('245.0');
+      expect(safariBottomChromeActionCenter(4, viewportWidth).toFixed(1)).assertEqual('307.0');
     });
 
     it('keeps the bottom edge aligned while retaining the avoid-area layout', 0, () => {
@@ -1146,7 +1229,7 @@ export default function videoParityModelsTest() {
       expect(tabOverviewTopPaddingForProgress(32, 0)).assertEqual(40);
       expect(tabOverviewTopPaddingForProgress(32, 0.5)).assertEqual(23);
       expect(tabOverviewTopPaddingForProgress(32, 1)).assertEqual(6);
-      expect(tabOverviewCardWidth(400)).assertEqual(178);
+      expect(tabOverviewCardWidth(400)).assertEqual(161);
     });
 
     it('keeps thumbnail previews proportional while anchoring the page crop to the top', 0, () => {

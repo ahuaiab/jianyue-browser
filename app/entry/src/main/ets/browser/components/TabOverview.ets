@@ -13,6 +13,8 @@ import {
   tabOverviewBorderOwner,
   tabOverviewGridOpacityForTransition,
   tabOverviewActiveCardScrollOffset,
+  tabOverviewGridLeft,
+  tabOverviewGridWidth,
   tabOverviewGridMaxScrollOffset,
   tabOverviewSearchSlotHeightForProgress,
   tabOverviewThumbnailTopOffset,
@@ -23,6 +25,9 @@ import {
 import { placeholderForFocus } from '../model/BrowserInteraction';
 import { TabCard } from './TabCard';
 import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP,
   BrowserChromeAnchor,
   browserChromeFloatingControlOffset,
   HARMONY_RADIUS_FLOATING
@@ -256,6 +261,20 @@ export struct TabOverview {
     return tabOverviewSearchSlotHeightForProgress(this.topInset, this.searchProgress());
   }
 
+  private gridHorizontalOffset(): number {
+    const gridLeft: number = tabOverviewGridLeft(
+      this.viewportWidth,
+      this.leftAvoidInset,
+      this.rightAvoidInset
+    );
+    const gridWidth: number = tabOverviewGridWidth(
+      this.viewportWidth,
+      this.leftAvoidInset,
+      this.rightAvoidInset
+    );
+    return gridLeft - (this.viewportWidth - gridWidth) / 2;
+  }
+
   private publishSearchProgress(): void {
     this.onSearchProgress(this.searchProgress());
   }
@@ -329,7 +348,7 @@ export struct TabOverview {
 
   @Builder
   private searchBar() {
-    Stack() {
+    Stack({ alignContent: Alignment.Top }) {
       Row() {
         TextInput({
           text: this.searchQuery,
@@ -341,7 +360,7 @@ export struct TabOverview {
           // The inset is owned by the gray pill itself. With no leading icon
           // or nested frame, the native caret remains unobstructed.
           .padding({ left: TAB_SEARCH_BAR_CONTENT_INSET, right: TAB_SEARCH_BAR_CONTENT_INSET })
-          .fontSize(15)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor('#1D1D1F')
           .placeholderColor('#7E858B')
           .backgroundColor(Color.Transparent)
@@ -358,11 +377,15 @@ export struct TabOverview {
           .onChange((value: string) => this.searchQuery = value);
       }
         .id('tab-overview-search-bar')
-        .width(`calc(100% - ${TAB_SEARCH_BAR_STYLE.horizontalInset * 2}vp)`)
+        .width(Math.max(1, tabOverviewGridWidth(
+          this.viewportWidth,
+          this.leftAvoidInset,
+          this.rightAvoidInset
+        ) - TAB_SEARCH_BAR_STYLE.horizontalInset * 2))
         .height(TAB_SEARCH_BAR_STYLE.height)
-        .margin({ left: 12, right: 12, top: 10 + this.topInset, bottom: 4 })
+        .margin({ top: 10 + this.topInset, bottom: 4 })
         .opacity(this.searchProgress())
-        .translate({ y: -20 * (1 - this.searchProgress()) })
+        .translate({ x: this.gridHorizontalOffset(), y: -20 * (1 - this.searchProgress()) })
         // A single gray pill is the pull-to-reveal search control.
         .backgroundColor(TAB_SEARCH_BAR_BACKGROUND_COLOR)
         .borderRadius(TAB_SEARCH_BAR_STYLE.cornerRadius);
@@ -454,8 +477,9 @@ export struct TabOverview {
         );
     }
       .id('tab-overview-grid-container')
-      .layoutWeight(1)
-      .width('100%');
+      .width(tabOverviewGridWidth(this.viewportWidth, this.leftAvoidInset, this.rightAvoidInset))
+      .height('100%')
+      .translate({ x: this.gridHorizontalOffset(), y: 0, z: 0 });
   }
 
   @Builder
@@ -467,7 +491,9 @@ export struct TabOverview {
       Row() {
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(23)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
             .fontColor(['#007AFF']);
         }
           .id('tab-overview-new-button')
@@ -479,7 +505,9 @@ export struct TabOverview {
           .onClick(() => this.onNewTab());
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           SymbolGlyph($r('sys.symbol.checkmark'))
-            .fontSize(23)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
             .fontColor(['#007AFF']);
         }
           .id('tab-overview-done-button')
@@ -535,7 +563,12 @@ export struct TabOverview {
         if (this.visibleTabs().length === 0) {
           this.emptyState();
         } else {
-          this.cardGrid();
+          Row() {
+            this.cardGrid();
+          }
+            .layoutWeight(1)
+            .width('100%')
+            .justifyContent(FlexAlign.Center);
         }
         this.bottomToolbar();
       }

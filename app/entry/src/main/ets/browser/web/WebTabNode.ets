@@ -6,6 +6,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
 import { BrowserTabRecord, lastValidUrlForTab, TabId } from '../model/BrowserTypes';
 import { shouldRetryWebHostAttachment } from '../model/BrowserInteraction';
+import { googleSearchCompatibleUserAgentFor } from '../model/PageActions';
 import {
   ExternalAppLinkLauncher,
   interceptExternalAppNavigation
@@ -20,6 +21,25 @@ import {
 
 const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
+const GOOGLE_SEARCH_UA_HOSTS: string[] = ['google.com', 'www.google.com'];
+let googleSearchUserAgentConfigured: boolean = false;
+
+function configureGoogleSearchUserAgent(): void {
+  if (googleSearchUserAgentConfigured) {
+    return;
+  }
+  try {
+    webview.WebviewController.initializeWebEngine();
+    const nativeUserAgent: string = webview.WebviewController.getDefaultUserAgent();
+    const compatibleUserAgent: string = googleSearchCompatibleUserAgentFor(nativeUserAgent);
+    if (compatibleUserAgent.length > 0 && compatibleUserAgent !== nativeUserAgent) {
+      webview.WebviewController.setUserAgentForHosts(compatibleUserAgent, GOOGLE_SEARCH_UA_HOSTS);
+      googleSearchUserAgentConfigured = true;
+    }
+  } catch (_error) {
+    // A missing optional host override must not prevent creating the tab.
+  }
+}
 
 export interface WebDownloadHandler {
   onBeforeDownload(tabId: TabId, item: webview.WebDownloadItem, isPrivate: boolean): void;
@@ -40,6 +60,7 @@ export interface WebDownloadObserver {
 
 export interface WebPageLifecycleObserver {
   onPageBegin(tabId: TabId, controller: webview.WebviewController, url: string): void;
+  onHistoryUrlChanged(tabId: TabId, controller: webview.WebviewController, url: string): void;
   onPageEnd(tabId: TabId, controller: webview.WebviewController): void;
   onScroll(tabId: TabId, controller: webview.WebviewController, yOffset: number): void;
   onTitleReceive(tabId: TabId, controller: webview.WebviewController, title: string): void;
@@ -84,11 +105,13 @@ class WebBuildData {
   readonly controller: webview.WebviewController;
   readonly isPrivate: boolean;
   readonly onPageBegin: (url: string) => void;
+  readonly onHistoryUrlChanged: (url: string) => void;
   readonly onPageEnd: () => void;
   readonly onScroll: (yOffset: number) => void;
   readonly onTitleReceive: (title: string) => void;
   readonly onFaviconReceived: (favicon: image.PixelMap) => void;
   readonly onExternalNavigation: (uri: string) => boolean;
+  readonly onBeforeNavigation: (uri: string) => boolean;
   readonly onError: (diagnostic: WebLoadError) => void;
   readonly onSslError: (diagnostic: WebSslError) => void;
   readonly onRenderExited: () => boolean;
@@ -117,7 +140,9 @@ class WebBuildData {
     permissionHandler: WebPermissionRequestHandler | undefined = undefined,
     onScroll: (yOffset: number) => void = (_yOffset: number) => undefined,
     onFaviconReceived: (favicon: image.PixelMap) => void = (_favicon: image.PixelMap) => undefined,
-    onExternalNavigation: (uri: string) => boolean = (_uri: string) => false
+    onExternalNavigation: (uri: string) => boolean = (_uri: string) => false,
+    onBeforeNavigation: (uri: string) => boolean = (_uri: string) => false,
+    onHistoryUrlChanged: (url: string) => void = (_url: string) => undefined
   ) {
     this.url = url;
     this.controller = controller;
@@ -128,6 +153,8 @@ class WebBuildData {
     this.onTitleReceive = onTitleReceive;
     this.onFaviconReceived = onFaviconReceived;
     this.onExternalNavigation = onExternalNavigation;
+    this.onBeforeNavigation = onBeforeNavigation;
+    this.onHistoryUrlChanged = onHistoryUrlChanged;
     this.onError = onError;
     this.onSslError = onSslError;
     this.onRenderExited = onRenderExited;
@@ -221,6 +248,7 @@ function buildWebNode(data: WebBuildData) {
       .height('100%')
       .javaScriptAccess(true)
       .domStorageAccess(true)
+      .gestureFocusMode(GestureFocusMode.GESTURE_TAP_AND_LONG_PRESS)
       .multiWindowAccess(true)
       .allowWindowOpenMethod(true)
       .geolocationAccess(true)
@@ -230,13 +258,36 @@ function buildWebNode(data: WebBuildData) {
         if (request === undefined) {
           return false;
         }
-        return data.onExternalNavigation(request.getRequestUrl());
+        const requestUrl: string = request.getRequestUrl();
+        const externalNavigationHandled: boolean = data.onExternalNavigation(requestUrl);
+        if (externalNavigationHandled) {
+          return true;
+        }
+        if (request.isMainFrame() && /^https?:\/\//i.test(requestUrl)) {
+          return data.onBeforeNavigation(requestUrl);
+        }
+        return false;
       })
       .onPageBegin((event) => {
         data.onPageBegin(event?.url ?? '');
       })
       .onRefreshAccessedHistory((event) => {
-        data.onPageBegin(event?.url ?? '');
+        if (event === undefined || event.url.trim().length === 0) {
+          return;
+        }
+        if (event.isMainFrame === false) {
+          return;
+        }
+        if (event.isMainFrame !== true) {
+          try {
+            if (data.controller.getUrl() !== event.url) {
+              return;
+            }
+          } catch (_error) {
+            return;
+          }
+        }
+        data.onHistoryUrlChanged(event.url);
       })
       .onPageEnd(() => {
         data.installDownloadDelegate();
@@ -403,29 +454,36 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
   private readonly runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined;
   private readonly permissionHandler: WebPermissionRequestHandler | undefined;
   private readonly externalAppLinkLauncher: ExternalAppLinkLauncher | undefined;
+  private readonly beforeNavigation: ((tabId: TabId, controller: webview.WebviewController, url: string) => boolean) | undefined;
   private runtimeSequence: number = 0;
 
   constructor(uiContext: UIContext, observer: WebPageLifecycleObserver | undefined = undefined,
     downloadHandler: WebDownloadHandler | string | undefined = undefined,
     runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined,
     permissionHandler: WebPermissionRequestHandler | undefined = undefined,
-    externalAppLinkLauncher: ExternalAppLinkLauncher | undefined = undefined) {
+    externalAppLinkLauncher: ExternalAppLinkLauncher | undefined = undefined,
+    beforeNavigation: ((tabId: TabId, controller: webview.WebviewController, url: string) => boolean) | undefined = undefined) {
     this.uiContext = uiContext;
     this.observer = observer;
     this.downloadHandler = typeof downloadHandler === 'string' ? undefined : downloadHandler;
     this.runtimeCreatedObserver = runtimeCreatedObserver;
     this.permissionHandler = permissionHandler;
     this.externalAppLinkLauncher = externalAppLinkLauncher;
+    this.beforeNavigation = beforeNavigation;
   }
 
   create(tab: BrowserTabRecord): WebRuntimeHandle {
     this.runtimeSequence += 1;
     const runtimeId: string = `webview-controller-${tab.id}-${this.runtimeSequence}`;
     const sourceUrl: string = lastValidUrlForTab(tab);
+    configureGoogleSearchUserAgent();
     const controller: webview.WebviewController = new webview.WebviewController();
     const builderNode: BuilderNode<[WebBuildData]> = new BuilderNode(this.uiContext);
     const onPageBegin: (url: string) => void = (url: string) => {
       this.observer?.onPageBegin(tab.id, controller, url);
+    };
+    const onHistoryUrlChanged: (url: string) => void = (url: string) => {
+      this.observer?.onHistoryUrlChanged(tab.id, controller, url);
     };
     const onPageEnd: () => void = () => {
       this.observer?.onPageEnd(tab.id, controller);
@@ -444,6 +502,9 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
         hilog.error(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
           `external-app-launch-failed scheme=${scheme}`);
       });
+    };
+    const onBeforeNavigation: (uri: string) => boolean = (uri: string) => {
+      return this.beforeNavigation?.(tab.id, controller, uri) ?? false;
     };
     const onError: (diagnostic: WebLoadError) => void = (diagnostic: WebLoadError) => {
       this.observer?.onError(tab.id, controller, diagnostic);
@@ -470,7 +531,8 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
       new WebBuildData(sourceUrl, controller, tab.isPrivate,
         onPageEnd, onTitleReceive, onError, onSslError,
         onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin,
-        this.permissionHandler, onScroll, onFaviconReceived, onExternalNavigation)
+        this.permissionHandler, onScroll, onFaviconReceived, onExternalNavigation, onBeforeNavigation,
+        onHistoryUrlChanged)
     );
     this.runtimeCreatedObserver?.(tab.id, sourceUrl, runtimeId);
     return new ArkWebRuntimeHandle(tab.id, runtimeId, controller, builderNode);

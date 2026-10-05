@@ -17,7 +17,17 @@ import {
   StartPageItem,
   StartPageItemType
 } from '../model/StartPageModels';
-import { HARMONY_RADIUS_CARD, HARMONY_RADIUS_CONTROL } from '../model/BrowserVisualMetrics';
+import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP,
+  BROWSER_UI_REFERENCE_WIDTH_VP,
+  BrowserChromeAnchor,
+  BrowserChromeLayoutFrame,
+  browserChromeLayoutFrame,
+  HARMONY_RADIUS_CARD,
+  HARMONY_RADIUS_CONTROL
+} from '../model/BrowserVisualMetrics';
 import { StartPageBackgroundImage } from './StartPageBackgroundImage';
 
 /**
@@ -36,8 +46,26 @@ export struct StartPage {
   @Param onAddFavorite: () => void = () => undefined;
   @Param onCustomize: () => void = () => undefined;
   @Param pageTranslateX: number = 0;
+  @Param leftInset: number = 0;
+  @Param rightInset: number = 0;
   /** Height of the page surface that remains visible above browser chrome. */
   @Param backgroundViewportHeight: number = 0;
+
+  @Local contentAvailableWidth: number = BROWSER_UI_REFERENCE_WIDTH_VP;
+
+  private contentFrame(): BrowserChromeLayoutFrame {
+    return browserChromeLayoutFrame(
+      this.contentAvailableWidth,
+      this.leftInset,
+      this.rightInset,
+      BrowserChromeAnchor.CENTER
+    );
+  }
+
+  private contentHorizontalOffset(): number {
+    return this.contentFrame().left -
+      (this.contentAvailableWidth - this.contentFrame().width) / 2;
+  }
 
   private immersiveMaterialSupported: boolean = safariImmersiveMaterialSupported();
 
@@ -128,7 +156,7 @@ export struct StartPage {
       .width(72)
       .height(36)
       .padding(0)
-      .fontSize(15)
+      .fontSize(BROWSER_UI_TEXT_SIZE_VP)
       .fontColor('#1D1D1F')
       .backgroundColor(safariImmersiveSurfaceBackgroundColor())
       .systemMaterial(this.shouldUseImmersiveSurface()
@@ -141,16 +169,22 @@ export struct StartPage {
   private favoriteTile(item: StartPageItem) {
     Column({ space: 6 }) {
       Stack() {
-        if (this.iconSourceFor(item.url).length > 0) {
-          Image(this.iconSourceFor(item.url))
-            .width(32)
-            .height(32)
-            .objectFit(ImageFit.Contain);
-        } else {
-          SymbolGlyph($r('sys.symbol.display'))
-            .fontSize(29)
-            .fontColor(['#007AFF']);
+        Stack() {
+          if (this.iconSourceFor(item.url).length > 0) {
+            Image(this.iconSourceFor(item.url))
+              .width(BROWSER_UI_ICON_SIZE_VP)
+              .height(BROWSER_UI_ICON_SIZE_VP)
+              .objectFit(ImageFit.Contain);
+          } else {
+            SymbolGlyph($r('sys.symbol.display'))
+              .fontSize(BROWSER_UI_ICON_SIZE_VP)
+              .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .fontColor(['#007AFF']);
+          }
         }
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP);
       }
       .width(56)
       .height(56)
@@ -158,7 +192,7 @@ export struct StartPage {
       .borderRadius(HARMONY_RADIUS_CONTROL)
 
       Text(item.title.length > 0 ? item.title : item.url)
-        .fontSize(13)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
         .fontColor('#1D1D1F')
         .maxLines(1)
         .textAlign(TextAlign.Center)
@@ -174,16 +208,22 @@ export struct StartPage {
   private listCard(item: StartPageItem) {
     Row({ space: 12 }) {
       Stack() {
-        if (this.iconSourceFor(item.url).length > 0) {
-          Image(this.iconSourceFor(item.url))
-            .width(30)
-            .height(30)
-            .objectFit(ImageFit.Contain);
-        } else {
-          SymbolGlyph($r('sys.symbol.display'))
-            .fontSize(27)
-            .fontColor(['#007AFF']);
+        Stack() {
+          if (this.iconSourceFor(item.url).length > 0) {
+            Image(this.iconSourceFor(item.url))
+              .width(BROWSER_UI_ICON_SIZE_VP)
+              .height(BROWSER_UI_ICON_SIZE_VP)
+              .objectFit(ImageFit.Contain);
+          } else {
+            SymbolGlyph($r('sys.symbol.display'))
+              .fontSize(BROWSER_UI_ICON_SIZE_VP)
+              .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .fontColor(['#007AFF']);
+          }
         }
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP);
       }
       .width(54)
       .height(54)
@@ -192,12 +232,12 @@ export struct StartPage {
 
       Column({ space: 3 }) {
         Text(item.title.length > 0 ? item.title : item.url)
-          .fontSize(15)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor('#1D1D1F')
           .maxLines(1)
           .width('100%')
         Text(item.url)
-          .fontSize(11)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontColor('#8A8A90')
           .maxLines(1)
           .width('100%')
@@ -222,7 +262,7 @@ export struct StartPage {
     Column({ space: 12 }) {
       Row() {
         Text(this.sectionTitle(type))
-          .fontSize(type === StartPageItemType.FAVORITE ? 22 : 20)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
           .fontWeight(FontWeight.Medium)
           .fontColor('#1D1D1F')
           .layoutWeight(1)
@@ -230,10 +270,12 @@ export struct StartPage {
         if (type !== StartPageItemType.FAVORITE) {
           Row({ space: 4 }) {
             Text('折叠')
-              .fontSize(14)
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
               .fontColor('#5C5C60')
             SymbolGlyph($r('sys.symbol.chevron_down'))
-              .fontSize(14)
+              .fontSize(BROWSER_UI_ICON_SIZE_VP)
+              .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+              .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
               .fontColor([Color.Gray])
           }
         }
@@ -279,7 +321,7 @@ export struct StartPage {
   }
 
   build() {
-    Stack({ alignContent: Alignment.TopStart }) {
+    Stack({ alignContent: Alignment.Top }) {
       this.pageBackground();
       Scroll() {
         Column({ space: 22 }) {
@@ -310,12 +352,19 @@ export struct StartPage {
       }
       .backgroundColor(Color.Transparent)
       .id('start-page-content-scroll')
-      .width('100%')
+      .width(this.contentFrame().width)
       .height('100%')
+      .translate({ x: this.contentHorizontalOffset(), y: 0, z: 0 })
     }
     .id('start-page')
     .width('100%')
     .height('100%')
+    .onAreaChange((_oldArea: Area, newArea: Area) => {
+      const width: number = Number(newArea.width);
+      if (Number.isFinite(width) && width > 0) {
+        this.contentAvailableWidth = width;
+      }
+    })
     .translate({ x: this.pageTranslateX, y: 0, z: 0 })
     .backgroundColor(this.startPageBackgroundColor())
   }

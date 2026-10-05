@@ -13,6 +13,13 @@ export const HARMONY_RADIUS_FLOATING: number = 20;
 export const HARMONY_RADIUS_SHEET: number = 24;
 export const HARMONY_RADIUS_PROGRESS: number = 2;
 
+/** Browser-owned UI sizing; web page content is intentionally not affected. */
+export const BROWSER_UI_TEXT_SIZE_VP: number = 16;
+export const BROWSER_UI_ICON_SIZE_VP: number = 24;
+export const BROWSER_UI_ICON_CONTAINER_SIZE_VP: number = 26;
+/** Current phone layout rounded to vp; wider windows retain these dimensions. */
+export const BROWSER_UI_REFERENCE_WIDTH_VP: number = 366;
+
 /** Modal sheets must cover the shared address transition layer (z=40). */
 export const BROWSER_MODAL_Z_INDEX: number = 50;
 /** Shared motion tokens for the Safari-style overview and bottom sheets. */
@@ -87,7 +94,7 @@ export const SAFARI_BOTTOM_CHROME_ACTION_COUNT: number = 5;
  * Ergonomic width of the combined address/toolbar surface. Wide windows keep
  * the portrait reach instead of stretching controls across the whole screen.
  */
-export const SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP: number = 400;
+export const SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP: number = BROWSER_UI_REFERENCE_WIDTH_VP;
 /** Side breathing room for independent floating actions. */
 export const SAFARI_FLOATING_CONTROL_EDGE_INSET_VP: number = 16;
 
@@ -152,8 +159,58 @@ export interface BrowserChromeLayoutFrame {
   width: number;
 }
 
+export interface LibraryTabInnerJoinFrame {
+  offsetX: number;
+  radius: number;
+  opensRight: boolean;
+}
+
 function finiteVisualMetric(value: number): number {
   return Number.isFinite(value) ? value : 0;
+}
+
+export const LIBRARY_CONTENT_CARD_DESIGN_WIDTH_VP: number = 326;
+export const LIBRARY_LIST_DESIGN_WIDTH_VP: number = 260.8;
+export const DOWNLOAD_SHEET_DESIGN_WIDTH_VP: number = BROWSER_UI_REFERENCE_WIDTH_VP;
+export const DOWNLOAD_CONTENT_DESIGN_WIDTH_VP: number = 292.8;
+export const BACKGROUND_ADJUST_SHEET_DESIGN_WIDTH_VP: number = BROWSER_UI_REFERENCE_WIDTH_VP;
+
+/** Fixed vp width, shrinking only when its available parent is narrower. */
+export function browserFixedWidth(availableWidth: number, designWidth: number): number {
+  return Math.min(
+    Math.max(1, finiteVisualMetric(availableWidth)),
+    Math.max(1, finiteVisualMetric(designWidth))
+  );
+}
+
+/** The card retains the existing 12vp side insets inside the library sheet. */
+export function libraryContentCardWidth(sheetWidth: number): number {
+  return browserFixedWidth(
+    Math.max(1, finiteVisualMetric(sheetWidth) - 24),
+    LIBRARY_CONTENT_CARD_DESIGN_WIDTH_VP
+  );
+}
+
+/** Match the existing centered list width independently of the device window. */
+export function libraryListWidth(contentWidth: number): number {
+  return browserFixedWidth(contentWidth, LIBRARY_LIST_DESIGN_WIDTH_VP);
+}
+
+export function libraryTabInnerJoinFrame(
+  contentWidth: number,
+  bookmarksSelected: boolean,
+  requestedRadius: number
+): LibraryTabInnerJoinFrame {
+  const width: number = Math.max(0, finiteVisualMetric(contentWidth));
+  const radius: number = Math.min(
+    Math.max(0, finiteVisualMetric(requestedRadius)),
+    width / 2
+  );
+  return {
+    offsetX: bookmarksSelected ? width / 2 : Math.max(0, width / 2 - radius),
+    radius,
+    opensRight: !bookmarksSelected
+  };
 }
 
 /** The painted material contains only the address row and action toolbar. */
@@ -226,7 +283,10 @@ export function browserChromeLayoutFrame(
   );
   const availableWidth: number = Math.max(1, safeViewportWidth - safeLeft - safeRight);
   const width: number = Math.min(SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP, availableWidth);
-  let left: number = safeLeft + (availableWidth - width) / 2;
+  // Keep the default visually centered in the physical window while clamping
+  // it to the safe horizontal bounds when that center would overlap an inset.
+  const maxLeft: number = safeViewportWidth - safeRight - width;
+  let left: number = Math.min(Math.max((safeViewportWidth - width) / 2, safeLeft), maxLeft);
   if (anchor === BrowserChromeAnchor.START) {
     left = safeLeft;
   } else if (anchor === BrowserChromeAnchor.END) {
@@ -278,7 +338,7 @@ export function browserChromeSurfaceHorizontalOffset(
 /**
  * Translate a smaller floating control from its safe-region center to the
  * requested smart-reach edge. The control width is intentionally independent
- * from the 400vp browser chrome width so overview and library actions can
+ * from the fixed browser chrome width so overview and library actions can
  * follow the same hand without changing their own visual size.
  */
 export function browserChromeFloatingControlOffset(
@@ -298,12 +358,15 @@ export function browserChromeFloatingControlOffset(
   );
   const availableWidth: number = Math.max(1, safeViewportWidth - safeLeft - safeRight);
   const width: number = Math.min(Math.max(1, finiteVisualMetric(controlWidth)), availableWidth);
-  const centeredLeft: number = safeLeft + (availableWidth - width) / 2;
+  // The caller centers the control row in the physical window; smart-reach
+  // offsets therefore use that baseline, clamped for the default anchor.
+  const centeredLeft: number = (safeViewportWidth - width) / 2;
+  const maxLeft: number = safeViewportWidth - safeRight - width;
   const edgeInset: number = Math.min(
     SAFARI_FLOATING_CONTROL_EDGE_INSET_VP,
     Math.max(0, availableWidth - width)
   );
-  let targetLeft: number = centeredLeft;
+  let targetLeft: number = Math.min(Math.max(centeredLeft, safeLeft), maxLeft);
   if (anchor === BrowserChromeAnchor.START) {
     targetLeft = safeLeft + edgeInset;
   } else if (anchor === BrowserChromeAnchor.END) {
@@ -360,7 +423,9 @@ export function safariAddressItemWidth(viewportWidth: number): number {
 }
 
 export function safariBottomChromeActionSlotWidth(viewportWidth: number): number {
-  return safariBottomChromeRailWidth(viewportWidth) / SAFARI_BOTTOM_CHROME_ACTION_COUNT;
+  return safariBottomChromeRailWidth(
+    browserFixedWidth(viewportWidth, SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP)
+  ) / SAFARI_BOTTOM_CHROME_ACTION_COUNT;
 }
 
 export function safariBottomChromeActionCenter(index: number, viewportWidth: number): number {

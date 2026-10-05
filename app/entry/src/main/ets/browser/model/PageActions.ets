@@ -50,6 +50,51 @@ export function desktopUserAgentFor(userAgent: string): string {
   return normalized.replace(/\bMobile\b/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+/** True for the exact Google Search hosts covered by the ArkWeb host UA rule. */
+export function isGoogleSearchUrl(url: string): boolean {
+  // WHATWG URL parsing treats backslashes as slashes for special schemes.
+  // Normalize them before extracting authority so `evil.test\\@google.com`
+  // cannot be mistaken for a Google host.
+  const normalizedUrl: string = url.trim().replace(/\\/g, '/');
+  const match: RegExpExecArray | null = /^https?:\/\/([^/?#]+)/i.exec(normalizedUrl);
+  if (match === null || match.length < 2) {
+    return false;
+  }
+  let authority: string = match[1];
+  const atIndex: number = authority.lastIndexOf('@');
+  if (atIndex >= 0) {
+    authority = authority.substring(atIndex + 1);
+  }
+  const host: string = authority.replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase();
+  return host === 'google.com' || host === 'www.google.com';
+}
+
+/**
+ * Normalize only ArkWeb's phone UA shape for Google Search. The Chrome and
+ * OpenHarmony versions come from the live default UA; no engine version is
+ * guessed. Desktop mode keeps the same identity and omits the Mobile marker.
+ */
+export function googleSearchCompatibleUserAgentFor(userAgent: string, mobile: boolean = true): string {
+  const normalized: string = userAgent.trim();
+  if (normalized.length === 0) {
+    return '';
+  }
+  const hasOpenHarmonyPhone: boolean = /\(Phone; OpenHarmony [^)]+\)/.test(normalized);
+  const hasChromeVersion: boolean = /\bChrome\/\d+(?:\.\d+)*\b/.test(normalized);
+  if (!hasOpenHarmonyPhone || !hasChromeVersion) {
+    return mobile ? normalized : desktopUserAgentFor(normalized);
+  }
+  let compatible: string = normalized
+    .replace(/\(Phone; OpenHarmony ([^)]+)\)/, '(Linux; OpenHarmony $1)')
+    .replace(/\s+ArkWeb\/[^\s]+/g, '')
+    .replace(/Safari\/([\d.]+)\s+Mobile$/, 'Mobile Safari/$1')
+    .replace(/\s{2,}/g, ' ');
+  if (!mobile) {
+    compatible = compatible.replace(/\s+Mobile(?=\s|$)/g, '');
+  }
+  return compatible.trim();
+}
+
 /** Keep the page-mode menu label and native symbol in the same state model. */
 export function pageModeMenuLabel(desktopMode: boolean): string {
   return desktopMode ? '请求手机网页' : '请求桌面网页';

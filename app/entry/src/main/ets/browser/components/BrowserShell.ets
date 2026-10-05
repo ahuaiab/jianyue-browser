@@ -43,12 +43,25 @@ import { HarmonyWebPermissionHandler } from '../web/ArkWebPermissionHandler';
 import { MemorySnapshotStorage, TabSnapshotCache } from '../snapshot/TabSnapshotCache';
 import { BrowserRepository } from '../data/BrowserRepository';
 import { PageIconFileStore } from '../data/PageIconFileStore';
+import { PageIconFallbackCoordinator } from '../data/PageIconFallbackCoordinator';
+import {
+  ImageKitPageIconDecoder,
+  NetworkKitPageIconHttpPort,
+  PageIconFallbackFetcher
+} from '../data/PageIconFallbackFetcher';
 import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
 import { KeyValueStore, MemoryKeyValueStore, PreferencesKeyValueStore } from '../data/KeyValueStore';
 import { BrowserLifecyclePort, BrowserLifecycleRegistry } from '../lifecycle/BrowserLifecyclePort';
 import { DownloadProgressSnapshot, DownloadStatus, DownloadTaskRecord } from '../model/DownloadModels';
 import { consumeFullScreenBackPress } from '../model/FullScreenBackAction';
-import { desktopUserAgentFor, PageAction } from '../model/PageActions';
+import { isBrowserWebPageAtTop } from '../model/BrowserPullRefresh';
+import { shouldShowPageLevelNetworkError } from '../model/BrowserLoadErrorPolicy';
+import {
+  desktopUserAgentFor,
+  googleSearchCompatibleUserAgentFor,
+  isGoogleSearchUrl,
+  PageAction
+} from '../model/PageActions';
 import {
   historyDeleteCutoff,
   HistoryDeleteRange,
@@ -82,8 +95,15 @@ import {
 } from '../model/StartPageModels';
 import {
   PageIconRecord,
+  pageIconPathForUrl,
+  pageIconSiteKeyForUrl,
   upsertPageIconRecord
 } from '../model/PageIconModels';
+import {
+  PageIconDiagnostics,
+  PageIconDiagnosticStage,
+  PageIconFailureCategory
+} from '../model/PageIconDiagnostics';
 import {
   shouldDisableBottomChromeHitTesting,
   shouldDisableTabOverviewLivePageHitTesting,
@@ -432,10 +452,20 @@ export class BrowserDownloadLifecycle {
 class ArkWebTabRuntimePort implements TabRuntimePort {
   private readonly store: TabStore;
   private readonly pool: WebTabPool;
+  private readonly beforeHistoryNavigation: (
+    tabId: TabId, controller: webview.WebviewController, targetUrl: string
+  ) => void;
 
-  constructor(store: TabStore, pool: WebTabPool) {
+  constructor(
+    store: TabStore,
+    pool: WebTabPool,
+    beforeHistoryNavigation: (
+      tabId: TabId, controller: webview.WebviewController, targetUrl: string
+    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _targetUrl: string) => undefined
+  ) {
     this.store = store;
     this.pool = pool;
+    this.beforeHistoryNavigation = beforeHistoryNavigation;
   }
 
   ensureBalanced(): void {
@@ -459,6 +489,11 @@ class ArkWebTabRuntimePort implements TabRuntimePort {
       if (!controller.accessBackward()) {
         return false;
       }
+      const history = controller.getBackForwardEntries();
+      const targetIndex: number = history.currentIndex - 1;
+      if (targetIndex >= 0 && targetIndex < history.size) {
+        this.beforeHistoryNavigation(tabId, controller, history.getItemAtIndex(targetIndex).historyUrl);
+      }
       controller.backward();
       return true;
     } catch (_error) {
@@ -474,6 +509,11 @@ class ArkWebTabRuntimePort implements TabRuntimePort {
     try {
       if (!controller.accessForward()) {
         return false;
+      }
+      const history = controller.getBackForwardEntries();
+      const targetIndex: number = history.currentIndex + 1;
+      if (targetIndex >= 0 && targetIndex < history.size) {
+        this.beforeHistoryNavigation(tabId, controller, history.getItemAtIndex(targetIndex).historyUrl);
       }
       controller.forward();
       return true;
@@ -506,6 +546,7 @@ class ArkWebTabRuntimePort implements TabRuntimePort {
 
 class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownloadObserver {
   private readonly pageBeginCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void;
+  private readonly historyUrlChangedCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void;
   private readonly callback: (tabId: TabId, controller: webview.WebviewController) => void;
   private readonly scrollCallback: (
     tabId: TabId, controller: webview.WebviewController, yOffset: number
@@ -573,9 +614,13 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
       tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap
     ) => void = (
       _tabId: TabId, _controller: webview.WebviewController, _favicon: image.PixelMap
-    ) => undefined
+    ) => undefined,
+    historyUrlChangedCallback: (
+      tabId: TabId, controller: webview.WebviewController, url: string
+    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _url: string) => undefined
   ) {
     this.pageBeginCallback = pageBeginCallback;
+    this.historyUrlChangedCallback = historyUrlChangedCallback;
     this.callback = callback;
     this.scrollCallback = scrollCallback;
     this.faviconCallback = faviconCallback;
@@ -593,6 +638,10 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
 
   onPageBegin(tabId: TabId, controller: webview.WebviewController, url: string): void {
     this.pageBeginCallback(tabId, controller, url);
+  }
+
+  onHistoryUrlChanged(tabId: TabId, controller: webview.WebviewController, url: string): void {
+    this.historyUrlChangedCallback(tabId, controller, url);
   }
 
   onPageEnd(tabId: TabId, controller: webview.WebviewController): void {
@@ -780,6 +829,8 @@ export struct BrowserShell {
   // so small rendering noise does not make the floating chrome chatter.
   @Local bottomChromeScrollHidden: boolean = false;
   private readonly lastWebScrollOffsetByTab: Map<TabId, number> = new Map();
+  private readonly latestWebScrollOffsetByTab: Map<TabId, number> = new Map();
+  @Local pullRefreshInProgressTabId: TabId = '';
   private bottomChromeScrollAnimationToken: number = 0;
   private bottomChromeScrollTargetHidden: boolean = false;
   // Bottom chrome is one Root-stack TabBar.  The editor expands inside that
@@ -931,6 +982,7 @@ export struct BrowserShell {
   private readonly pageDisplayStates: Map<TabId, PageDisplayState> = new Map();
   private readonly desktopModeByTab: Map<TabId, boolean> = new Map();
   private readonly mobileUserAgentByTab: Map<TabId, string> = new Map();
+  private readonly pendingUserAgentNavigationByTab: Map<TabId, string> = new Map();
   // Keep the semantic search label while a search provider performs an
   // intermediate redirect (for example Bing's login handoff). The compact
   // address bar must not fall back to that redirect URL or a generic page
@@ -948,13 +1000,15 @@ export struct BrowserShell {
   // stays in search presentation until the user submits a new address.
   private readonly pendingSearchNavigationByTab: Set<TabId> = new Set();
   private readonly searchResultSettledAtByTab: Map<TabId, number> = new Map();
-  private readonly desktopAppliedControllerIds: Set<string> = new Set();
   private readonly pageReadyByTab: Map<TabId, boolean> = new Map();
   private readonly canNavigateBackByTab: Map<TabId, boolean> = new Map();
   private readonly canNavigateForwardByTab: Map<TabId, boolean> = new Map();
   private readonly errorStatesByTab: Map<TabId, BrowserErrorState | undefined> = new Map();
   private repository: BrowserRepository | undefined = undefined;
   private pageIconFileStore: PageIconFileStore | undefined = undefined;
+  private pageIconFallbackFetcher: PageIconFallbackFetcher | undefined = undefined;
+  private pageIconFallbackCoordinator: PageIconFallbackCoordinator | undefined = undefined;
+  private readonly pageIconDiagnostics: PageIconDiagnostics = new PageIconDiagnostics();
   private downloadService: DownloadService | undefined = undefined;
   private downloadLifecycle: BrowserDownloadLifecycle | undefined = undefined;
   private lifecyclePort: BrowserLifecyclePort | undefined = undefined;
@@ -1010,7 +1064,7 @@ export struct BrowserShell {
     const hostContext = uiContext.getHostContext();
     this.pageIconFileStore = hostContext === undefined
       ? undefined
-      : new PageIconFileStore(hostContext.filesDir);
+      : new PageIconFileStore(hostContext.filesDir, this.pageIconDiagnostics);
     const permissionHandler = hostContext === undefined
       ? undefined
       : new HarmonyWebPermissionHandler(hostContext);
@@ -1060,8 +1114,16 @@ export struct BrowserShell {
           renderedUrl,
           validation.valid ? 'page-end-committed' : 'preserved-last-valid'
         );
+        if (this.pullRefreshInProgressTabId === tabId) {
+          this.pullRefreshInProgressTabId = '';
+        }
+        this.pageReadyByTab.set(tabId, true);
         if (tabId === this.tabStore.activeTabId) {
           this.pageReady = true;
+          if (this.errorState?.kind === BrowserErrorKind.NETWORK) {
+            this.errorState = undefined;
+            this.errorStatesByTab.set(tabId, undefined);
+          }
           this.refreshNavigationState(controller);
           this.rememberTabViewState(tabId);
         }
@@ -1086,7 +1148,11 @@ export struct BrowserShell {
           diagnostic.url,
           'preserved-last-valid'
         );
-        if (diagnostic.isMainFrame) {
+        const pageLoadPending: boolean = !(this.pageReadyByTab.get(tabId) ?? false);
+        if (shouldShowPageLevelNetworkError(diagnostic.isMainFrame, pageLoadPending, diagnostic.code)) {
+          if (this.pullRefreshInProgressTabId === tabId) {
+            this.pullRefreshInProgressTabId = '';
+          }
           this.showBrowserError(tabId, BrowserErrorKind.NETWORK, diagnostic.code, diagnostic.url);
         }
       },
@@ -1102,11 +1168,17 @@ export struct BrowserShell {
           'preserved-last-valid'
         );
         if (diagnostic.isMainFrame) {
+          if (this.pullRefreshInProgressTabId === tabId) {
+            this.pullRefreshInProgressTabId = '';
+          }
           this.showBrowserError(tabId, BrowserErrorKind.SSL, diagnostic.code, diagnostic.url);
         }
       },
       (tabId: TabId, _controller: webview.WebviewController) => {
         this.logBrowserLifecycle('renderer_exited', tabId, this.urlForTab(tabId), 0, true, '');
+        if (this.pullRefreshInProgressTabId === tabId) {
+          this.pullRefreshInProgressTabId = '';
+        }
         this.showBrowserError(tabId, BrowserErrorKind.RENDERER_EXITED, 0, this.urlForTab(tabId));
         return true;
       },
@@ -1168,7 +1240,12 @@ export struct BrowserShell {
         void tabId;
       },
       (tabId: TabId, controller: webview.WebviewController, reportedUrl: string) => {
+        this.pageReadyByTab.set(tabId, false);
+        if (tabId === this.tabStore.activeTabId) {
+          this.pageReady = false;
+        }
         this.resetBottomChromeScroll(tabId);
+        this.latestWebScrollOffsetByTab.delete(tabId);
         const currentUrl: string = this.urlForTab(tabId);
         const validation = validateBrowserUrl(reportedUrl);
         const nextUrl: string = committedNavigationUrl(reportedUrl, currentUrl);
@@ -1220,6 +1297,37 @@ export struct BrowserShell {
         this.handleWebPageScroll(tabId, controller, yOffset),
       (tabId: TabId, controller: webview.WebviewController, favicon: image.PixelMap) => {
         void this.handleFaviconReceived(tabId, controller, favicon);
+      },
+      (tabId: TabId, controller: webview.WebviewController, url: string) => {
+        if (tabId === this.tabStore.activeTabId) {
+          this.refreshNavigationState(controller);
+        }
+        const currentUrl: string = this.urlForTab(tabId);
+        const validation = validateBrowserUrl(url);
+        if (!validation.valid) {
+          this.logRejectedLifecycleUrl(tabId, url, currentUrl, 'onRefreshAccessedHistory');
+          return;
+        }
+        const nextUrl: string = committedNavigationUrl(url, currentUrl);
+        if (nextUrl === currentUrl) {
+          return;
+        }
+        this.updateAddressPresentationForNavigation(tabId, nextUrl, 'end');
+        const nextTitle: string = this.titleForNavigation(tabId, nextUrl);
+        if (this.tabStore.updateTabUrl(
+          tabId,
+          nextUrl,
+          nextTitle,
+          this.addressSourceForTab(tabId),
+          this.searchQueriesByTab.get(tabId)
+        )) {
+          this.cardRevision += 1;
+          this.bumpTabStateRevision();
+          if (tabId === this.tabStore.activeTabId) {
+            this.rememberTabViewState(tabId);
+          }
+          void this.saveSession();
+        }
       }
     );
     const keyValueStore: KeyValueStore = hostContext === undefined
@@ -1275,9 +1383,18 @@ export struct BrowserShell {
           'web-src-runtime-created'
         ),
       permissionHandler,
-      externalAppLinkLauncher
+      externalAppLinkLauncher,
+      (tabId: TabId, controller: webview.WebviewController, url: string): boolean =>
+        this.deferUserAgentNavigationIfNeeded(tabId, controller, url)
     ));
-    this.runtimePort = new ArkWebTabRuntimePort(this.tabStore, this.webTabPool);
+    this.runtimePort = new ArkWebTabRuntimePort(
+      this.tabStore,
+      this.webTabPool,
+      (tabId: TabId, controller: webview.WebviewController, targetUrl: string): void => {
+        this.pendingUserAgentNavigationByTab.delete(tabId);
+        this.applyUserAgentForNavigation(tabId, controller, targetUrl);
+      }
+    );
     this.dispatcher = new DefaultBrowserCommandDispatcher(
       this.tabStore,
       this.runtimePort,
@@ -1315,7 +1432,8 @@ export struct BrowserShell {
     this.mainWindow = undefined;
     this.downloadLifecycle?.stop();
     this.downloadLifecycle = undefined;
-    void this.closeTabsForBrowserExit();
+    // Component teardown does not prove the browser app is being closed.
+    // Keep the persisted tab session so the ability can resume from Recents.
     if (this.lifecyclePort !== undefined) {
       BrowserLifecycleRegistry.clear(this.lifecyclePort);
       this.lifecyclePort = undefined;
@@ -2022,6 +2140,10 @@ export struct BrowserShell {
   }
 
   private removeTabViewState(tabId: TabId): void {
+    this.latestWebScrollOffsetByTab.delete(tabId);
+    if (this.pullRefreshInProgressTabId === tabId) {
+      this.pullRefreshInProgressTabId = '';
+    }
     this.pageDisplayStates.delete(tabId);
     this.pageReadyByTab.delete(tabId);
     this.canNavigateBackByTab.delete(tabId);
@@ -2596,6 +2718,7 @@ export struct BrowserShell {
     tabId: TabId,
     isNewTab: boolean = false
   ): boolean {
+    this.pendingUserAgentNavigationByTab.delete(tabId);
     const validation = validateBrowserUrl(requestedUrl);
     if (!validation.valid) {
       this.logRejectedLifecycleUrl(tabId, requestedUrl, this.urlForTab(tabId), caller);
@@ -2613,6 +2736,7 @@ export struct BrowserShell {
       'loadUrl-requested'
     );
     try {
+      this.applyUserAgentForNavigation(tabId, controller, url);
       controller.loadUrl(url);
       return true;
     } catch (_error) {
@@ -2726,6 +2850,10 @@ export struct BrowserShell {
   }
 
   private async initializeSession(): Promise<void> {
+    // Recent-task force-stop can terminate the process without onDestroy.
+    // Keep home/foreground transitions in memory, but never resurrect tabs
+    // from the prior process on a genuine cold launch.
+    await this.repository?.clearSessionForColdStart();
     this.browserSettings = await this.repository?.loadSettings() ?? copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
     const savedPageIcons: PageIconRecord[] = await this.repository?.listPageIcons() ?? [];
     const pageIconFileStore: PageIconFileStore | undefined = this.pageIconFileStore;
@@ -2817,8 +2945,27 @@ export struct BrowserShell {
     if (url === undefined || url === 'about:blank') {
       return;
     }
-    const localPath: string | undefined = await fileStore.save(url, favicon);
-    if (localPath === undefined || !fileStore.exists(localPath)) {
+    this.pageIconDiagnostics.record(PageIconDiagnosticStage.CALLBACK_RECEIVED, url);
+    let localPath: string | undefined;
+    try {
+      localPath = await fileStore.save(url, favicon);
+    } catch (_error) {
+      localPath = undefined;
+    }
+    let fileExists: boolean = false;
+    if (localPath !== undefined) {
+      try {
+        fileExists = fileStore.exists(localPath);
+      } catch (_error) {
+        fileExists = false;
+      }
+    }
+    if (localPath === undefined || !fileExists) {
+      this.pageIconDiagnostics.record(
+        PageIconDiagnosticStage.FILE_WRITE,
+        url,
+        PageIconFailureCategory.FILE_WRITE_FAILED
+      );
       return;
     }
     const record: PageIconRecord = {
@@ -2828,7 +2975,91 @@ export struct BrowserShell {
     };
     this.pageIconItems = upsertPageIconRecord(this.pageIconItems, record);
     this.pageIconRevision += 1;
-    await repository.savePageIcon(record);
+    try {
+      await repository.savePageIcon(record);
+      this.pageIconDiagnostics.record(PageIconDiagnosticStage.REPOSITORY_PERSIST, url);
+    } catch (_error) {
+      this.pageIconDiagnostics.record(
+        PageIconDiagnosticStage.REPOSITORY_PERSIST,
+        url,
+        PageIconFailureCategory.REPOSITORY_PERSIST_FAILED
+      );
+    }
+  }
+
+  private requestMissingPageIcon(url: string): void {
+    if (!this.showLibrary) {
+      return;
+    }
+    const normalizedUrl: string = url.trim();
+    const repository: BrowserRepository | undefined = this.repository;
+    const fileStore: PageIconFileStore | undefined = this.pageIconFileStore;
+    if (normalizedUrl.length === 0 || repository === undefined || fileStore === undefined) {
+      return;
+    }
+    if (this.hasCachedPageIcon(normalizedUrl, fileStore)) {
+      this.pageIconDiagnostics.record(PageIconDiagnosticStage.CACHE_HIT, normalizedUrl);
+      return;
+    }
+    let fetcher: PageIconFallbackFetcher | undefined = this.pageIconFallbackFetcher;
+    if (fetcher === undefined) {
+      fetcher = new PageIconFallbackFetcher(
+        new NetworkKitPageIconHttpPort(),
+        new ImageKitPageIconDecoder(),
+        fileStore,
+        this.pageIconDiagnostics
+      );
+      this.pageIconFallbackFetcher = fetcher;
+    }
+    let coordinator: PageIconFallbackCoordinator | undefined = this.pageIconFallbackCoordinator;
+    if (coordinator === undefined) {
+      const activeFetcher: PageIconFallbackFetcher = fetcher;
+      coordinator = new PageIconFallbackCoordinator(
+        pageIconSiteKeyForUrl,
+        (pageUrl: string): boolean => this.hasCachedPageIcon(pageUrl, fileStore),
+        async (pageUrl: string): Promise<PageIconRecord | undefined> => {
+          this.pageIconDiagnostics.record(PageIconDiagnosticStage.CACHE_MISS, pageUrl);
+          const record: PageIconRecord | undefined = await activeFetcher.fetch(pageUrl);
+          if (record === undefined) {
+            return undefined;
+          }
+          // The native ArkWeb callback wins if it filled the cache while the
+          // fallback request was in flight.
+          if (this.hasCachedPageIcon(pageUrl, fileStore)) {
+            return record;
+          }
+          try {
+            await repository.savePageIcon(record);
+          } catch (_error) {
+            this.pageIconDiagnostics.record(
+              PageIconDiagnosticStage.REPOSITORY_PERSIST,
+              pageUrl,
+              PageIconFailureCategory.REPOSITORY_PERSIST_FAILED
+            );
+            return undefined;
+          }
+          this.pageIconItems = upsertPageIconRecord(this.pageIconItems, record);
+          this.pageIconRevision += 1;
+          this.pageIconDiagnostics.record(PageIconDiagnosticStage.REPOSITORY_PERSIST, pageUrl);
+          return record;
+        },
+        3
+      );
+      this.pageIconFallbackCoordinator = coordinator;
+    }
+    coordinator.request(normalizedUrl);
+  }
+
+  private hasCachedPageIcon(url: string, fileStore: PageIconFileStore): boolean {
+    const path: string | undefined = pageIconPathForUrl(this.pageIconItems, url);
+    if (path === undefined) {
+      return false;
+    }
+    try {
+      return fileStore.exists(path);
+    } catch (_error) {
+      return false;
+    }
   }
 
   private openExternalUrl(url: string): void {
@@ -3588,48 +3819,112 @@ export struct BrowserShell {
     controller: webview.WebviewController,
     reload: boolean
   ): boolean {
-    const controllerKey: string = `${tabId}:${this.runtimePort?.controllerIdFor(tabId) ?? ''}`;
-    if (this.desktopAppliedControllerIds.has(controllerKey)) {
-      return true;
+    const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+      (item: BrowserTabRecord) => item.id === tabId
+    );
+    if (tab === undefined) {
+      return false;
     }
+    let pageUrl: string = lastValidUrlForTab(tab);
     try {
-      const desktopUserAgent: string = desktopUserAgentFor(controller.getUserAgent());
-      if (desktopUserAgent.length === 0) {
-        return false;
-      }
-      const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
-        (item: BrowserTabRecord) => item.id === tabId
-      );
-      if (tab === undefined) {
-        return false;
-      }
-      if (this.desktopModeByTab.get(tabId) === true) {
-        let mobileUserAgent: string | undefined = this.mobileUserAgentByTab.get(tabId);
-        if (mobileUserAgent === undefined) {
-          mobileUserAgent = controller.getUserAgent().trim();
-          if (mobileUserAgent.length > 0) {
-            this.mobileUserAgentByTab.set(tabId, mobileUserAgent);
-          }
+      try {
+        const currentUrl: string = controller.getUrl();
+        if (currentUrl.length > 0 && currentUrl !== 'about:blank') {
+          pageUrl = currentUrl;
         }
-        const desktopUserAgent: string = desktopUserAgentFor(mobileUserAgent ?? '');
-        if (desktopUserAgent.length === 0) {
-          return false;
-        }
-        controller.setCustomUserAgent(desktopUserAgent);
-      } else {
-        // Restoring the exact UA observed before the first desktop switch
-        // keeps the device's real phone identity instead of guessing a new
-        // mobile string or leaving the desktop UA latched on the tab.
-        controller.setCustomUserAgent(this.mobileUserAgentByTab.get(tabId) ?? '');
+      } catch (_error) {
+        // Before Web attachment, the saved tab URL is the navigation target.
       }
+      this.applyUserAgentForNavigation(tabId, controller, pageUrl);
       if (reload) {
         controller.loadUrl(lastValidUrlForTab(tab));
       }
-      this.desktopAppliedControllerIds.add(controllerKey);
       return true;
     } catch (_error) {
       return false;
     }
+  }
+
+  private applyUserAgentForNavigation(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string
+  ): void {
+    try {
+      const requestedUserAgent: string | undefined = this.requestedUserAgentForNavigation(
+        tabId, controller, targetUrl
+      );
+      if (requestedUserAgent !== undefined && controller.getCustomUserAgent() !== requestedUserAgent) {
+        controller.setCustomUserAgent(requestedUserAgent);
+      }
+    } catch (_error) {
+      // User-agent customization must not block a validated navigation.
+    }
+  }
+
+  private requestedUserAgentForNavigation(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string
+  ): string | undefined {
+    if (this.desktopModeByTab.get(tabId) === true) {
+      const defaultUserAgent: string = controller.getUserAgent();
+      return isGoogleSearchUrl(targetUrl)
+        ? googleSearchCompatibleUserAgentFor(defaultUserAgent, false)
+        : desktopUserAgentFor(defaultUserAgent);
+    }
+    return this.mobileUserAgentByTab.has(tabId) ? '' : undefined;
+  }
+
+  private deferUserAgentNavigationIfNeeded(
+    tabId: TabId,
+    controller: webview.WebviewController,
+    targetUrl: string
+  ): boolean {
+    let requestedUserAgent: string | undefined;
+    let currentUserAgent: string;
+    try {
+      requestedUserAgent = this.requestedUserAgentForNavigation(tabId, controller, targetUrl);
+      if (requestedUserAgent === undefined) {
+        this.pendingUserAgentNavigationByTab.delete(tabId);
+        return false;
+      }
+      currentUserAgent = controller.getCustomUserAgent();
+    } catch (_error) {
+      return false;
+    }
+    if (currentUserAgent === requestedUserAgent) {
+      this.pendingUserAgentNavigationByTab.delete(tabId);
+      return false;
+    }
+    const initialRequestedUserAgent: string = requestedUserAgent;
+    if (this.pendingUserAgentNavigationByTab.get(tabId) === targetUrl) {
+      return true;
+    }
+    this.pendingUserAgentNavigationByTab.set(tabId, targetUrl);
+    setTimeout(() => {
+      if (this.pendingUserAgentNavigationByTab.get(tabId) !== targetUrl) {
+        return;
+      }
+      this.pendingUserAgentNavigationByTab.delete(tabId);
+      const tabStillExists: boolean = this.tabStore.tabs.some((item: BrowserTabRecord) => item.id === tabId);
+      if (!tabStillExists || this.runtimePort?.controllerFor(tabId) !== controller) {
+        return;
+      }
+      try {
+        const latestRequestedUserAgent: string = this.requestedUserAgentForNavigation(
+          tabId, controller, targetUrl
+        ) ?? initialRequestedUserAgent;
+        const latestCurrentUserAgent: string = controller.getCustomUserAgent();
+        if (latestCurrentUserAgent !== latestRequestedUserAgent) {
+          controller.setCustomUserAgent(latestRequestedUserAgent);
+        }
+        controller.loadUrl(targetUrl);
+      } catch (_error) {
+        // Allow normal Web lifecycle callbacks to report any navigation failure.
+      }
+    }, 0);
+    return true;
   }
 
   private togglePageMode(): void {
@@ -3641,7 +3936,6 @@ export struct BrowserShell {
     if (controller === undefined) {
       return;
     }
-    const canonicalUrl: string = lastValidUrlForTab(tab);
     const wasDesktop: boolean = this.desktopModeByTab.get(tab.id) === true;
     if (!wasDesktop && this.mobileUserAgentByTab.get(tab.id) === undefined) {
       try {
@@ -3655,8 +3949,6 @@ export struct BrowserShell {
     }
     try {
       this.desktopModeByTab.set(tab.id, !wasDesktop);
-      const controllerKey: string = `${tab.id}:${this.runtimePort?.controllerIdFor(tab.id) ?? ''}`;
-      this.desktopAppliedControllerIds.delete(controllerKey);
       if (!this.applyUserAgentMode(tab.id, controller, false)) {
         if (wasDesktop) {
           this.desktopModeByTab.set(tab.id, true);
@@ -3665,9 +3957,9 @@ export struct BrowserShell {
         }
         return;
       }
+      this.bumpTabStateRevision();
       this.pageReady = false;
       this.pageReadyByTab.set(tab.id, false);
-      controller.loadUrl(canonicalUrl);
     } catch (_error) {
       this.desktopModeByTab.set(tab.id, wasDesktop);
     }
@@ -3835,6 +4127,7 @@ export struct BrowserShell {
   }
 
   private closeLibrary(): void {
+    this.pageIconFallbackCoordinator?.resetFailedSites();
     this.showLibrary = false;
   }
 
@@ -3906,7 +4199,21 @@ export struct BrowserShell {
   private closeTabsForBrowserExit(): Promise<void> {
     this.browserExitRequested = true;
     if (this.browserExitCleanupPromise === undefined) {
-      this.browserExitCleanupPromise = this.performBrowserExitCleanup();
+      const cleanupPromise: Promise<void> = this.performBrowserExitCleanup();
+      this.browserExitCleanupPromise = cleanupPromise;
+      void cleanupPromise.then(
+        () => {
+          if (this.browserExitCleanupPromise === cleanupPromise) {
+            this.browserExitCleanupPromise = undefined;
+            this.browserExitRequested = false;
+          }
+        },
+        () => {
+          if (this.browserExitCleanupPromise === cleanupPromise) {
+            this.browserExitCleanupPromise = undefined;
+          }
+        }
+      );
     }
     return this.browserExitCleanupPromise;
   }
@@ -4291,6 +4598,8 @@ export struct BrowserShell {
         this.refreshNavigationState();
         return true;
       }
+      // Returning to the desktop backgrounds the ability; actual app teardown
+      // is handled by its destroy lifecycle callbacks.
       return false;
     }
     this.gestureActive = false;
@@ -4331,6 +4640,16 @@ export struct BrowserShell {
   private onReload(): void {
     this.clearHistorySuppression();
     this.dispatcher?.reloadActiveTab();
+  }
+
+  private onPullRefresh(): void {
+    const tabId: TabId = this.tabStore.activeTabId;
+    if (this.pullRefreshInProgressTabId === tabId) {
+      return;
+    }
+    this.pullRefreshInProgressTabId = tabId;
+    this.latestWebScrollOffsetByTab.set(tabId, 0);
+    this.onReload();
   }
 
   private thumbnailFor(tabId: TabId): image.PixelMap | undefined {
@@ -4766,7 +5085,7 @@ export struct BrowserShell {
   }
 
   private cardWidth(): number {
-    return tabOverviewCardWidth(this.viewportWidth);
+    return tabOverviewCardWidth(this.viewportWidth, this.leftAvoidInset, this.rightAvoidInset);
   }
 
   private cardEngineFor(tabId: TabId): GestureDecisionEngine {
@@ -5587,6 +5906,7 @@ export struct BrowserShell {
       return;
     }
     const boundedOffset: number = Math.max(0, Number.isFinite(yOffset) ? yOffset : 0);
+    this.latestWebScrollOffsetByTab.set(tabId, boundedOffset);
     const previousOffset: number | undefined = this.lastWebScrollOffsetByTab.get(tabId);
     if (boundedOffset <= 0) {
       this.lastWebScrollOffsetByTab.set(tabId, 0);
@@ -5617,6 +5937,29 @@ export struct BrowserShell {
       boundedOffset
     );
     this.setBottomChromeScrollHidden(nextHidden);
+  }
+
+  private activeWebPageIsAtTopForRender(): boolean {
+    // Web.onScroll provides the absolute page offset; avoid inferring the top
+    // from WebviewController.getScrollOffset(), whose sign is not equivalent.
+    const offset: number | undefined = this.latestWebScrollOffsetByTab.get(this.sceneActiveTabId);
+    return offset === undefined || isBrowserWebPageAtTop(offset);
+  }
+
+  private pullRefreshEnabledForRender(): boolean {
+    return this.pageReady &&
+      this.pullRefreshInProgressTabId !== this.sceneActiveTabId &&
+      !this.pageDisplayState.fullScreen &&
+      this.errorState === undefined &&
+      !this.addressEditing &&
+      !this.showLibrary &&
+      !this.showDownloadManager &&
+      !this.showStartPageCustomize &&
+      !this.showStartPageBackgroundAdjust &&
+      this.sceneActiveTabId === this.tabStore.activeTabId &&
+      this.hostControllers.get(this.sceneActiveTabId) !== undefined &&
+      !this.gestureActive && !this.isDragging && this.gestureState === TabGestureState.IDLE &&
+      this.overviewProgress <= 0 && !this.overviewClosing && !this.overviewAnimationClosing;
   }
 
   private hideBottomChromeForRender(): boolean {
@@ -5739,7 +6082,9 @@ export struct BrowserShell {
       activeIndex,
       this.topAvoidInset,
       this.overviewSearchProgress,
-      measuredScrollOffset
+      measuredScrollOffset,
+      this.leftAvoidInset,
+      this.rightAvoidInset
     );
   }
 
@@ -5858,8 +6203,14 @@ export struct BrowserShell {
             settings: this.browserSettings,
             viewportWidth: this.viewportWidth,
             viewportHeight: this.viewportHeight,
+            leftAvoidInset: this.leftAvoidInset,
+            rightAvoidInset: this.rightAvoidInset,
             topContentInset: this.topAvoidInset,
             bottomContentInset: this.shouldRenderBottomBrowserBar() ? this.bottomBrowserBarHeight() : 0,
+            canPullToRefresh: this.pullRefreshEnabledForRender(),
+            isPullRefreshing: this.pullRefreshInProgressTabId === this.sceneActiveTabId,
+            isPageAtTop: () => this.activeWebPageIsAtTopForRender(),
+            onPullRefresh: () => this.onPullRefresh(),
             currentX: this.pageTranslateXForRender(),
             previewX: this.adjacentTranslateXForRender(),
             currentHost: this.hostControllers.get(this.sceneActiveTabId),
@@ -6132,6 +6483,10 @@ export struct BrowserShell {
         if (this.showDownloadManager && this.overviewProgress === 0) {
           DownloadManagerSheet({
             tasks: this.downloadTasks,
+            viewportWidth: this.viewportWidth,
+            leftInset: this.leftAvoidInset,
+            rightInset: this.rightAvoidInset,
+            chromeAnchor: this.browserChromeAnchor,
             topInset: this.topAvoidInset,
             bottomInset: this.bottomAvoidInset,
             onClose: () => this.closeDownloadManager(),
@@ -6179,6 +6534,7 @@ export struct BrowserShell {
             onRemoveBookmark: (url: string) => { void this.removeBookmark(url); },
             onRemoveHistory: (entry: LibraryEntry) => { void this.removeHistory(entry); },
             onDeleteHistoryRange: (range: HistoryDeleteRange) => { void this.removeHistoryRange(range); },
+            onMissingPageIcon: (url: string) => this.requestMissingPageIcon(url),
             onClose: () => this.closeLibrary()
           })
             .align(Alignment.Bottom)
@@ -6245,6 +6601,9 @@ export struct BrowserShell {
           this.pendingStartPageBackgroundId.trim().length > 0) {
           StartPageBackgroundAdjustSheet({
             source: this.pendingStartPageBackgroundId,
+            viewportWidth: this.viewportWidth,
+            leftInset: this.leftAvoidInset,
+            rightInset: this.rightAvoidInset,
             backgroundPosition: this.pendingStartPageBackgroundPosition,
             backgroundScale: this.pendingStartPageBackgroundScale,
             pageViewportWidth: this.viewportWidth,

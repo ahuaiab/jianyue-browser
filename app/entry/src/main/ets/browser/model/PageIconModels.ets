@@ -30,17 +30,17 @@ export function pageIconPathForUrl(records: PageIconRecord[], url: string): stri
   if (exactRecord !== undefined) {
     return exactRecord.localPath.trim();
   }
-  const siteKey: string = pageIconSiteKey(normalizedUrl);
+  const siteKey: string = pageIconSiteKeyForUrl(normalizedUrl);
   if (siteKey.length === 0) {
     return undefined;
   }
   const siteRecord: PageIconRecord | undefined = records.find((item: PageIconRecord) =>
-    validPageIconRecord(item) && pageIconSiteKey(item.url.trim()) === siteKey);
+    validPageIconRecord(item) && pageIconSiteKeyForUrl(item.url.trim()) === siteKey);
   return siteRecord?.localPath.trim();
 }
 
 /** Favicons belong to the site, so a query/path variant can reuse its icon. */
-function pageIconSiteKey(url: string): string {
+export function pageIconSiteKeyForUrl(url: string): string {
   const schemeEnd: number = url.indexOf('://');
   if (schemeEnd <= 0) {
     return '';

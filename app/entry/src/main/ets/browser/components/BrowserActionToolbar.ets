@@ -1,13 +1,18 @@
 /** Fixed lower action row for the shared Safari bottom chrome. */
 import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP,
   SAFARI_ACTION_TOOLBAR_HEIGHT_VP,
-  SAFARI_BOTTOM_CHROME_RAIL_INSET_VP
+  SAFARI_BOTTOM_CHROME_RAIL_INSET_VP,
+  safariBottomChromeActionSlotWidth
 } from '../model/BrowserVisualMetrics';
 import { LIBRARY_BOOKMARK_BUTTON_MENU_LABEL } from '../model/LibraryModels';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 @ComponentV2
 export struct BrowserActionToolbar {
+  @Param layoutWidth: number = SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP;
   @Param canGoBack: boolean = false;
   @Param canGoForward: boolean = false;
   @Param interactionLocked: boolean = false;
@@ -28,6 +33,13 @@ export struct BrowserActionToolbar {
   @Local menuShownId: string = '';
   @Local longPressedId: string = '';
   @Local suppressNextClickId: string = '';
+
+  private actionWidth(): number {
+    const layoutWidth: number = Number.isFinite(this.layoutWidth) && this.layoutWidth > 0
+      ? this.layoutWidth
+      : SAFARI_BROWSER_CHROME_DESIGN_WIDTH_VP;
+    return safariBottomChromeActionSlotWidth(layoutWidth);
+  }
 
   private beginLongPress(id: string): void {
     if (this.interactionLocked) {
@@ -89,25 +101,27 @@ export struct BrowserActionToolbar {
         .strokeLineJoin(LineJoinStyle.Round)
         .offset({ x: -3, y: -3 });
       SymbolGlyph($r('sys.symbol.square'))
-        .fontSize(24)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
         .fontColor(['#007AFF'])
         .offset({ x: 3, y: 3 });
     }
-      .width(32)
-      .height(32);
+      .id('tab-overview-icon-container')
+      .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+      .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP);
   }
 
   @Builder
   private iconButton(symbol: Resource, id: string, action: () => void, enabled: boolean = true) {
     Button({ type: ButtonType.Normal, stateEffect: false }) {
       SymbolGlyph(symbol)
-        .fontSize(25)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor([enabled ? '#007AFF' : '#AAB2BD']);
     }
       .id(id)
-      .width('100%')
+      .width(this.actionWidth())
       .height(44)
-      .layoutWeight(1)
       .padding(0)
       .backgroundColor(Color.Transparent)
       .stateEffect(false)
@@ -153,7 +167,7 @@ export struct BrowserActionToolbar {
 
   private bookmarkMenuSymbol(): SymbolGlyphModifier {
     return new SymbolGlyphModifier($r('sys.symbol.bookmark'))
-      .fontSize('20vp')
+      .fontSize('24vp')
       .fontColor(['#1D1D1F']);
   }
 
@@ -161,13 +175,14 @@ export struct BrowserActionToolbar {
   private libraryButton() {
     Button({ type: ButtonType.Normal, stateEffect: false }) {
       SymbolGlyph($r('sys.symbol.bookmark'))
-        .fontSize(25)
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
         .fontColor(['#007AFF']);
     }
       .id('browser-library-button')
-      .width('100%')
+      .width(this.actionWidth())
       .height(44)
-      .layoutWeight(1)
       .padding(0)
       .backgroundColor(Color.Transparent)
       .stateEffect(false)
@@ -189,13 +204,14 @@ export struct BrowserActionToolbar {
       Row() {
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(25)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor([this.canGoBack ? '#007AFF' : '#AAB2BD']);
       }
         .id('browser-back-button')
-        .width('100%')
+        .width(this.actionWidth())
         .height(44)
-        .layoutWeight(1)
         .padding(0)
         .backgroundColor(Color.Transparent)
         .stateEffect(false)
@@ -204,13 +220,14 @@ export struct BrowserActionToolbar {
         .onClick(() => this.handleClick('browser-back-button', this.onBack));
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.chevron_right'))
-          .fontSize(25)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor([this.canGoForward ? '#007AFF' : '#AAB2BD']);
       }
         .id('browser-forward-button')
-        .width('100%')
+        .width(this.actionWidth())
         .height(44)
-        .layoutWeight(1)
         .padding(0)
         .backgroundColor(Color.Transparent)
         .stateEffect(false)
@@ -219,16 +236,17 @@ export struct BrowserActionToolbar {
         .onClick(() => this.handleClick('browser-forward-button', this.onForward));
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.share'))
-          .fontSize(25)
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
           .fontColor(['#007AFF']);
       }
         .id('browser-share-button')
-        .width('100%')
+        .width(this.actionWidth())
         .height(44)
-        .layoutWeight(1)
-      .padding(0)
-      .backgroundColor(Color.Transparent)
-      .stateEffect(false)
+        .padding(0)
+        .backgroundColor(Color.Transparent)
+        .stateEffect(false)
         // Keep sharing as a tap-only action. The exclusive long-press branch
         // intentionally has no callback, so a held share button cannot fall
         // through to the tap action when the finger is released.
@@ -248,9 +266,8 @@ export struct BrowserActionToolbar {
         this.tabOverviewIcon();
       }
         .id('tab-count-button')
-        .width('100%')
+        .width(this.actionWidth())
         .height(44)
-        .layoutWeight(1)
         .padding(0)
         .backgroundColor(Color.Transparent)
         .stateEffect(false)

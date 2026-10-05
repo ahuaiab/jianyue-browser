@@ -25,6 +25,9 @@ import adaptiveBrowserLayoutTest from './ets/test/AdaptiveBrowserLayout.test';
 import startPageBookmarksTest from './ets/test/StartPageBookmarks.test';
 import pageIconsTest from './ets/test/PageIcons.test';
 import externalAppNavigationTest from './ets/test/ExternalAppNavigation.test';
+import browserPullRefreshTest from './ets/test/BrowserPullRefresh.test';
+import browserLoadErrorPolicyTest from './ets/test/BrowserLoadErrorPolicy.test';
+import googleSearchUserAgentTest from './ets/test/GoogleSearchUserAgent.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -54,4 +57,7 @@ export default function testsuite() {
   startPageBookmarksTest();
   pageIconsTest();
   externalAppNavigationTest();
+  browserPullRefreshTest();
+  browserLoadErrorPolicyTest();
+  googleSearchUserAgentTest();
 }

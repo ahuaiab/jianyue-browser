@@ -33,6 +33,11 @@ import { addressTextColorFor } from '../model/BrowserInteraction';
 import { TabPreviewKind } from '../model/TabGestureMotion';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
 import { AddressSearchBar, AddressSearchBarDownloadProps, addressSearchBarDownloadProps } from './AddressSearchBar';
+import {
+  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
+  BROWSER_UI_ICON_SIZE_VP,
+  BROWSER_UI_TEXT_SIZE_VP
+} from '../model/BrowserVisualMetrics';
 
 const ADDRESS_PREVIEW_SURFACE = addressPreviewSurfaceVisual(ADDRESS_SEARCH_BAR_STYLE.cornerRadius);
 
@@ -356,7 +361,9 @@ export struct AddressTabStrip {
             .borderRadius(ADDRESS_PREVIEW_SURFACE.cornerRadius)
             .opacity(this.addressBackgroundOpacity());
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(26)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
             .fontColor(['#1677FF'])
             .opacity(this.addressPlusOpacity());
           }
@@ -373,12 +380,14 @@ export struct AddressTabStrip {
         this.addressHandoffMounted, this.addressHandoffProgress)) {
         Stack() {
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(26)
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
             .fontColor(['#1677FF'])
             .opacity(this.handoffPlusOpacity())
             .scale({ x: this.handoffPlusScale(), y: this.handoffPlusScale() });
           Text('搜索或输入网站')
-            .fontSize(16)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
             .fontColor(addressTextColorFor(false))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })

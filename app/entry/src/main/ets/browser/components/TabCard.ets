@@ -160,16 +160,16 @@ export struct TabCard {
       : '#1D1D1F';
     if (index === 0) {
       return new SymbolGlyphModifier($r('sys.symbol.plus'))
-        .fontSize('20vp')
+        .fontSize('24vp')
         .fontColor([color]);
     }
     if (index === 1) {
       return new SymbolGlyphModifier($r('sys.symbol.xmark'))
-        .fontSize('20vp')
+        .fontSize('24vp')
         .fontColor([color]);
     }
     return new SymbolGlyphModifier($r('sys.symbol.xmark_circle'))
-      .fontSize('20vp')
+      .fontSize('24vp')
       .fontColor([color]);
   }
 
@@ -335,7 +335,9 @@ export struct TabCard {
       // parallel pan gesture from consuming a direct tap.
       Button({ type: ButtonType.Normal, stateEffect: false }) {
         SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(14)
+          .fontSize(24)
+          .width(26)
+          .height(26)
           .fontColor(['#69727C'])
           .opacity(tabOverviewCardCaptionVisualOpacity(this.livePreview));
       }

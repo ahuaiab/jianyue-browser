@@ -46,7 +46,7 @@ export struct PageDisplayMenu {
       ? $r('sys.symbol.rectangle_portrait')
       : $r('sys.symbol.display');
     return new SymbolGlyphModifier(symbolResource)
-      .fontSize('20vp')
+      .fontSize('24vp')
       .fontColor(['#1D1D1F']);
   }
 
@@ -58,10 +58,8 @@ export struct PageDisplayMenu {
         symbolStartIcon: this.pageModeMenuSymbol()
       })
         .enabled(this.webReady)
-        .onChange((selected: boolean) => {
-          if (selected) {
-            this.onAction(PageAction.DESKTOP_SITE);
-          }
+        .onChange((_selected: boolean) => {
+          this.onAction(PageAction.DESKTOP_SITE);
         })
     }
   }
@@ -73,7 +71,7 @@ export struct PageDisplayMenu {
     Stack() {
       Button('大小', { type: ButtonType.Normal, stateEffect: false })
         .id('page-display-size-button')
-        .fontSize(13)
+        .fontSize(16)
         .width(48)
         .height(34)
         .padding(0)

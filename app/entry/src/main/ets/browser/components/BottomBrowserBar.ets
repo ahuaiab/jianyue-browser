@@ -135,6 +135,7 @@ export struct BottomBrowserBar {
             .height(SAFARI_ADDRESS_ROW_HEIGHT_VP);
         }
         BrowserActionToolbar({
+          layoutWidth: this.viewportWidth,
           canGoBack: this.canGoBack, canGoForward: this.canGoForward,
           navigationStateRevision: this.navigationStateRevision,
           interactionLocked: this.interactionLocked, onBack: this.onBack, onForward: this.onForward,
