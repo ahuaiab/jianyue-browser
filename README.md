@@ -2,7 +2,7 @@
 
 简悦浏览器是一款基于 HarmonyOS 原生 ArkUI / ArkWeb 的移动端浏览器。
 
-当前版本：v0.1.6。[更新说明](docs/release-notes-v0.1.6.md) · [完整更新日志](CHANGELOG.md)
+当前版本：v0.1.6。[更新说明](docs/release-notes-v0.1.6.md)
 
 ## AI 使用说明
 
