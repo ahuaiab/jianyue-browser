@@ -375,7 +375,6 @@ export struct DownloadManagerSheet {
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .translate({ x: this.sheetHorizontalOffset(), y: this.sheetSwipeOffset })
-        .opacity(1 - Math.min(0.22, this.sheetSwipeOffset / 240 * 0.22))
         .parallelGesture(
           PanGesture({ direction: PanDirection.Vertical, distance: 8 })
             .onActionStart(() => this.beginSheetSwipe())

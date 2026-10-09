@@ -1,6 +1,5 @@
 import { BrowserTabRecord } from './BrowserTypes';
 import {
-  browserChromeLayoutFrame,
   HARMONY_RADIUS_CARD,
   HARMONY_RADIUS_CONTROL
 } from './BrowserVisualMetrics';
@@ -185,13 +184,32 @@ export function tabOverviewCardTopForProgress(topInset: number, progress: number
     tabOverviewTopPaddingForProgress(topInset, progress);
 }
 
-/** Fixed phone grid, centered inside the horizontal safe region. */
+interface TabOverviewHorizontalFrame {
+  left: number;
+  width: number;
+}
+
+/** Fill the horizontal safe region without changing the fixed bottom chrome. */
+function tabOverviewSafeHorizontalFrame(
+  viewportWidth: number,
+  leftAvoidInset: number,
+  rightAvoidInset: number
+): TabOverviewHorizontalFrame {
+  const viewport: number = Math.max(1, Number.isFinite(viewportWidth) ? viewportWidth : 0);
+  const requestedLeft: number = Math.max(0, Number.isFinite(leftAvoidInset) ? leftAvoidInset : 0);
+  const left: number = Math.min(requestedLeft, Math.max(0, viewport - 1));
+  const requestedRight: number = Math.max(0, Number.isFinite(rightAvoidInset) ? rightAvoidInset : 0);
+  const right: number = Math.min(requestedRight, Math.max(0, viewport - left - 1));
+  return { left: left, width: Math.max(1, viewport - left - right) };
+}
+
+/** Keep two card columns across the full horizontal safe region. */
 export function tabOverviewGridWidth(
   viewportWidth: number,
   leftAvoidInset: number = 0,
   rightAvoidInset: number = 0
 ): number {
-  return browserChromeLayoutFrame(viewportWidth, leftAvoidInset, rightAvoidInset).width;
+  return tabOverviewSafeHorizontalFrame(viewportWidth, leftAvoidInset, rightAvoidInset).width;
 }
 
 export function tabOverviewGridLeft(
@@ -199,10 +217,10 @@ export function tabOverviewGridLeft(
   leftAvoidInset: number = 0,
   rightAvoidInset: number = 0
 ): number {
-  return browserChromeLayoutFrame(viewportWidth, leftAvoidInset, rightAvoidInset).left;
+  return tabOverviewSafeHorizontalFrame(viewportWidth, leftAvoidInset, rightAvoidInset).left;
 }
 
-/** Calculate one card from the same fixed grid used by the overview and live transition. */
+/** Share each card's adaptive width between the grid and the live transition. */
 export function tabOverviewCardWidth(
   viewportWidth: number,
   leftAvoidInset: number = 0,

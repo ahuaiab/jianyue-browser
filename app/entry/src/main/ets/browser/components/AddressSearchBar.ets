@@ -4,6 +4,7 @@ import {
   BROWSER_UI_TEXT_SIZE_VP
 } from '../model/BrowserVisualMetrics';
 import { PageAction, pageModeMenuLabel, pageModeMenuSymbolName } from '../model/PageActions';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import {
   addressBarLabelFor,
   AddressSecurityState,
@@ -12,6 +13,7 @@ import {
   searchQueryTextFor
 } from '../model/BrowserTypes';
 import { PageFontSize } from '../model/PageDisplayState';
+import { PAGE_LOAD_FADE_MS } from '../model/PageLoadProgress';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ADDRESS_SEARCH_BAR_STYLE, ADDRESS_SEARCH_BAR_TOP_PADDING } from '../model/TabOverviewActions';
@@ -32,6 +34,12 @@ import {
   SAFARI_ADDRESS_ROW_HEIGHT_VP
 } from '../model/BrowserVisualMetrics';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
+import { SiteSearchSuggestion } from '../model/SiteSearchModels';
+import {
+  autoReaderEnabledFor, DEFAULT_READER_MODE_SETTINGS,
+  ReaderModeSettings, ReaderModeTextSize, ReaderModeTheme
+} from '../model/ReaderMode';
+import { ReaderMenuControls } from './ReaderMenuControls';
 
 export interface AddressSearchBarDownloadProps {
   downloadActive: boolean;
@@ -104,9 +112,20 @@ export struct AddressSearchBar {
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
+  @Param isPrivate: boolean = false;
+  @Param readerAvailable: boolean = false;
+  @Param readerActive: boolean = false;
+  @Param readerSettings: ReaderModeSettings = DEFAULT_READER_MODE_SETTINGS;
+  @Param onReaderTextSize: (size: ReaderModeTextSize) => void = (_size: ReaderModeTextSize) => undefined;
+  @Param onReaderTheme: (theme: ReaderModeTheme) => void = (_theme: ReaderModeTheme) => undefined;
+  @Param onReaderAutoChange: (enabled: boolean) => void = (_enabled: boolean) => undefined;
   @Param downloadActive: boolean = false;
   /** -1 represents a running download with no known total size. */
   @Param downloadProgress: number = 0;
+  @Param pageLoadProgress: number = 0;
+  @Param pageLoadOpacity: number = 1;
+  @Param siteSearchSuggestion: SiteSearchSuggestion | undefined = undefined;
+  @Param onSiteSearch: (url: string) => void = (_url: string) => undefined;
   @Param onNavigate: (value: string) => void = (_value: string) => undefined;
   @Param onOpenAddress: () => void = () => undefined;
   @Param onAddressCancel: () => void = () => undefined;
@@ -131,6 +150,7 @@ export struct AddressSearchBar {
   @Local pageMenuShown: boolean = false;
   @Local longPressActive: boolean = false;
   @Local addressInputFocused: boolean = false;
+  @Local siteSearchPopupWidth: number = 300;
   private readonly inputController: TextInputController = new TextInputController();
 
   aboutToAppear(): void {
@@ -258,6 +278,20 @@ export struct AddressSearchBar {
     this.onGestureCancel();
     this.longPressActive = true;
     this.pageMenuShown = true;
+    browserHaptics.light('address-long-press');
+  }
+
+  private beginReaderLongPress(): void {
+    if (!this.gestureEnabled || (!this.readerAvailable && !this.readerActive)) {
+      this.beginLongPress();
+      return;
+    }
+    this.onGestureCancel();
+    this.longPressActive = true;
+    this.pageMenuShown = false;
+
+    browserHaptics.light('reader-mode-long-press');
+    this.onPageAction(PageAction.READER_MODE);
   }
 
   private endLongPress(): void {
@@ -312,9 +346,68 @@ export struct AddressSearchBar {
       .fontColor(['#1D1D1F']);
   }
 
+  private siteSearchSuggestionVisible(): boolean {
+    return this.inputMounted && this.editorActive && this.addressInputFocused &&
+      this.siteSearchSuggestion !== undefined && this.siteSearchSuggestion.url.length > 0;
+  }
+
+  @Builder
+  private siteSearchSuggestionPopup() {
+    if (this.siteSearchSuggestion !== undefined) {
+      Button({ type: ButtonType.Normal, stateEffect: false }) {
+        Row({ space: 8 }) {
+          SymbolGlyph($r('sys.symbol.magnifyingglass'))
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .fontColor(['#007AFF']);
+          Text('在' + this.siteSearchSuggestion.siteName + '中搜索“' +
+            this.siteSearchSuggestion.query + '”')
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#1D1D1F')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1);
+        }
+          .width('100%')
+          .height(48);
+      }
+        .id('browser-site-search-suggestion')
+        .width(this.siteSearchPopupWidth)
+        .height(50)
+        .padding({ left: 12, right: 12 })
+        .backgroundColor('#FFFFFF')
+        .border({ width: 1, color: '#D1D1D6' })
+        .borderRadius(12)
+        .onClick(() => {
+          const suggestion: SiteSearchSuggestion | undefined = this.siteSearchSuggestion;
+          if (suggestion !== undefined) {
+            this.onSiteSearch(suggestion.url);
+          }
+        });
+    }
+  }
   @Builder
   private pageMenu() {
     Menu() {
+      MenuItem({ content: this.readerActive ? '退出阅读模式' : '显示阅读模式' })
+        .id('browser-reader-menu-item')
+        .enabled(this.readerAvailable || this.readerActive)
+        .onChange((selected: boolean) => {
+          if (selected) {
+            this.runPageAction(PageAction.READER_MODE);
+          }
+        })
+      if (this.readerActive) {
+        ReaderMenuControls({
+          preferences: this.readerSettings.preferences,
+          autoReaderEnabled: autoReaderEnabledFor(this.address, this.readerSettings.autoReaderHosts),
+          allowAutoReaderChange: !this.isPrivate,
+          onTextSizeChange: this.onReaderTextSize,
+          onThemeChange: this.onReaderTheme,
+          onAutoReaderChange: this.onReaderAutoChange
+        })
+      }
       MenuItem({ content: '下载管理' })
         .id('browser-download-manager-menu-item')
         .onChange((selected: boolean) => {
@@ -333,6 +426,7 @@ export struct AddressSearchBar {
           }
         })
     }
+    .width(this.readerActive ? 300 : 240)
   }
 
   build() {
@@ -396,7 +490,7 @@ export struct AddressSearchBar {
               })
               .parallelGesture(
                 LongPressGesture({ duration: 300 })
-                  .onAction(() => this.beginLongPress())
+                  .onAction(() => this.beginReaderLongPress())
                   .onActionEnd(() => this.endLongPress())
                   .onActionCancel(() => this.endLongPress())
               );
@@ -458,7 +552,9 @@ export struct AddressSearchBar {
             .textAlign(addressTextAlignmentFor(this.editorActive) === 'start'
               ? TextAlign.Start
               : TextAlign.Center)
-            .opacity(this.editorClosing ? this.editorCollapseProgress() : 1)
+            .visibility(this.editorClosing && this.editorCollapseProgress() <= 0.5
+              ? Visibility.Hidden : Visibility.Visible)
+            .transition(TransitionEffect.IDENTITY)
             .backgroundColor(Color.Transparent)
             .padding({
               left: addressTextAlignmentFor(this.editorActive) === 'start'
@@ -491,6 +587,12 @@ export struct AddressSearchBar {
               this.draftAddress = value;
               this.onDraftChange(value);
             })
+            .onAreaChange((_oldArea, newArea) => {
+              const measuredWidth: number = Number(newArea.width);
+              if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
+                this.siteSearchPopupWidth = measuredWidth;
+              }
+            })
               .onSubmit(() => this.submitAddress());
           } else {
             Text(this.collapsedAddress())
@@ -506,6 +608,7 @@ export struct AddressSearchBar {
               // ArkUI text selection so a long/slow horizontal drag cannot
               // open the system selection handles instead of the tab swipe.
               .textSelectable(TextSelectableMode.UNSELECTABLE)
+              .transition(TransitionEffect.IDENTITY)
               .padding({ left: 0, right: 0 });
           }
           if (this.editorClosing && this.editorActive) {
@@ -519,7 +622,26 @@ export struct AddressSearchBar {
               .textAlign(TextAlign.Center)
               .textSelectable(TextSelectableMode.UNSELECTABLE)
               .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))
-              .opacity(1 - this.editorCollapseProgress())
+              .visibility(this.editorCollapseProgress() <= 0.5 ? Visibility.Visible : Visibility.Hidden)
+              .transition(TransitionEffect.IDENTITY)
+              .hitTestBehavior(HitTestMode.None);
+          }
+          if (!this.isStartPage() && this.pageLoadProgress > 0 && this.pageLoadProgress <= 100) {
+            Stack({ alignContent: Alignment.BottomStart }) {
+              Row()
+                .id('browser-page-load-progress')
+                .width(`${this.pageLoadProgress}%`)
+                .height(2)
+                .borderRadius(1)
+                .backgroundColor('#007AFF')
+                .hitTestBehavior(HitTestMode.None)
+                .opacity(this.pageLoadOpacity)
+                .animation({ duration: PAGE_LOAD_FADE_MS, curve: Curve.EaseOut });
+            }
+              .width('100%')
+              .height('100%')
+              .padding({ bottom: 1 })
+              .zIndex(3)
               .hitTestBehavior(HitTestMode.None);
           }
         }
@@ -548,6 +670,13 @@ export struct AddressSearchBar {
       .padding({ top: this.containerTopPadding(),
         bottom: this.containerHeight() - this.containerTopPadding() - ADDRESS_SEARCH_BAR_STYLE.height })
       .backgroundColor(Color.Transparent)
+      .bindPopup(this.siteSearchSuggestionVisible(), {
+        builder: this.siteSearchSuggestionPopup,
+        placement: Placement.Top,
+        targetSpace: 0,
+        enableArrow: false,
+        backgroundBlurStyle: BlurStyle.NONE
+      })
       .bindContextMenu(this.gestureEnabled && this.pageMenuShown, this.pageMenu, {
         onDisappear: () => this.dismissPageMenu()
       })

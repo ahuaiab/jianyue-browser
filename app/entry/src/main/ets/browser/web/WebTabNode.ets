@@ -60,6 +60,7 @@ export interface WebDownloadObserver {
 
 export interface WebPageLifecycleObserver {
   onPageBegin(tabId: TabId, controller: webview.WebviewController, url: string): void;
+  onProgressChange(tabId: TabId, controller: webview.WebviewController, progress: number): void;
   onHistoryUrlChanged(tabId: TabId, controller: webview.WebviewController, url: string): void;
   onPageEnd(tabId: TabId, controller: webview.WebviewController): void;
   onScroll(tabId: TabId, controller: webview.WebviewController, yOffset: number): void;
@@ -105,6 +106,7 @@ class WebBuildData {
   readonly controller: webview.WebviewController;
   readonly isPrivate: boolean;
   readonly onPageBegin: (url: string) => void;
+  readonly onProgressChange: (progress: number) => void;
   readonly onHistoryUrlChanged: (url: string) => void;
   readonly onPageEnd: () => void;
   readonly onScroll: (yOffset: number) => void;
@@ -142,12 +144,14 @@ class WebBuildData {
     onFaviconReceived: (favicon: image.PixelMap) => void = (_favicon: image.PixelMap) => undefined,
     onExternalNavigation: (uri: string) => boolean = (_uri: string) => false,
     onBeforeNavigation: (uri: string) => boolean = (_uri: string) => false,
-    onHistoryUrlChanged: (url: string) => void = (_url: string) => undefined
+    onHistoryUrlChanged: (url: string) => void = (_url: string) => undefined,
+    onProgressChange: (progress: number) => void = (_progress: number) => undefined
   ) {
     this.url = url;
     this.controller = controller;
     this.isPrivate = isPrivate;
     this.onPageBegin = onPageBegin;
+    this.onProgressChange = onProgressChange;
     this.onScroll = onScroll;
     this.onPageEnd = onPageEnd;
     this.onTitleReceive = onTitleReceive;
@@ -270,6 +274,11 @@ function buildWebNode(data: WebBuildData) {
       })
       .onPageBegin((event) => {
         data.onPageBegin(event?.url ?? '');
+      })
+      .onProgressChange((event) => {
+        if (event !== undefined) {
+          data.onProgressChange(event.newProgress);
+        }
       })
       .onRefreshAccessedHistory((event) => {
         if (event === undefined || event.url.trim().length === 0) {
@@ -482,6 +491,9 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     const onPageBegin: (url: string) => void = (url: string) => {
       this.observer?.onPageBegin(tab.id, controller, url);
     };
+    const onProgressChange: (progress: number) => void = (progress: number) => {
+      this.observer?.onProgressChange(tab.id, controller, progress);
+    };
     const onHistoryUrlChanged: (url: string) => void = (url: string) => {
       this.observer?.onHistoryUrlChanged(tab.id, controller, url);
     };
@@ -532,7 +544,7 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
         onPageEnd, onTitleReceive, onError, onSslError,
         onRenderExited, onWindowNew, onFullScreenEnter, onFullScreenExit, downloadDelegate, onPageBegin,
         this.permissionHandler, onScroll, onFaviconReceived, onExternalNavigation, onBeforeNavigation,
-        onHistoryUrlChanged)
+        onHistoryUrlChanged, onProgressChange)
     );
     this.runtimeCreatedObserver?.(tab.id, sourceUrl, runtimeId);
     return new ArkWebRuntimeHandle(tab.id, runtimeId, controller, builderNode);

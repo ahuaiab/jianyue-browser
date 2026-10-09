@@ -1,0 +1,7 @@
+# Preserve upstream reader assets and license checksums on every platform.
+app/entry/src/main/resources/rawfile/reader/Readability.js -text
+app/entry/src/main/resources/rawfile/reader/Readability-readerable.js -text
+app/entry/src/main/resources/rawfile/reader/Readability-LICENSE.md -text
+app/entry/src/main/resources/rawfile/reader/Readability-NOTICE.txt -text
+app/entry/src/main/resources/rawfile/reader/purify.min.js -text
+app/entry/src/main/resources/rawfile/reader/DOMPurify-LICENSE.txt -text

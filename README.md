@@ -2,6 +2,8 @@
 
 简悦浏览器是一款基于 HarmonyOS 原生 ArkUI / ArkWeb 的移动端浏览器。
 
+当前版本：v0.1.6。[更新说明](docs/release-notes-v0.1.6.md) · [完整更新日志](CHANGELOG.md)
+
 ## AI 使用说明
 
 本项目源码主要由 AI 根据项目发起人提供的产品创意和方向生成。项目发起人主要提供创意，不将 AI 生成内容表述为项目发起人的全部独立原创代码。
@@ -22,8 +24,10 @@ AI 输出的权利范围取决于所使用 AI 服务的条款和适用法律。�
 - `@ohos/hypium@1.0.25`：测试框架，来自 [OpenHarmony OHPM](https://ohpm.openharmony.cn/)。
 - `@ohos/hamock@1.0.0`：测试 Mock 能力，来自 [OpenHarmony OHPM](https://ohpm.openharmony.cn/)。版本记录见 `app/oh-package.json5` 和 `app/oh-package-lock.json5`。
 - HarmonyOS ArkUI / ArkWeb API：运行时由 HarmonyOS SDK 提供，SDK 不随本仓库分发。
+- [Mozilla Readability](https://github.com/mozilla/readability) 0.6.0（commit ab4027a8b37669745016869a37a504727992b2ba）：用于阅读模式的正文识别和提取，采用 Apache-2.0；上游源码以本地脚本形式打包，未修改，保留 LICENSE 和 NOTICE。
+- [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.16（commit 18f8f0e3d8efe7e3c8d3d2679aebd0df72164ead）：用于阅读模式正文的 HTML 清理，按 Apache-2.0 使用；上游压缩脚本未修改，保留 LICENSE。
 
-截至当前修订版，除上述模板代码和外部依赖外，未发现其他以源码形式引入的第三方项目。后续引入第三方源码或依赖时，请补充名称、来源 URL、版本或 commit、许可证、用途及本地修改范围。
+阅读模式的第三方脚本及许可文件位于 `app/entry/src/main/resources/rawfile/reader/`，详细来源、版本和文件校验值见该目录的 [README](app/entry/src/main/resources/rawfile/reader/README.md) 与 [vendor-manifest.json](app/entry/src/main/resources/rawfile/reader/vendor-manifest.json)。`reader-runtime.js` 是本项目的集成代码。后续引入第三方源码或依赖时，请补充名称、来源 URL、版本或 commit、许可证、用途及本地修改范围。
 
 ## 许可证
 

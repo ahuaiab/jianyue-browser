@@ -3,7 +3,8 @@ import { PageFontSize } from './PageDisplayState';
 export enum PageAction {
   BOOKMARK = 'bookmark',
   DOWNLOAD_MANAGER = 'download_manager',
-  DESKTOP_SITE = 'desktop_site'
+  DESKTOP_SITE = 'desktop_site',
+  READER_MODE = 'reader_mode'
 }
 
 export interface PageActionAvailability {

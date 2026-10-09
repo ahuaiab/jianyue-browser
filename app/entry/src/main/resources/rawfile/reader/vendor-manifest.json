@@ -1,0 +1,56 @@
+﻿[
+    {
+        "repo":  "mozilla/readability",
+        "version":  "0.6.0",
+        "commit":  "ab4027a8b37669745016869a37a504727992b2ba",
+        "file":  "Readability.js",
+        "source":  "https://raw.githubusercontent.com/mozilla/readability/ab4027a8b37669745016869a37a504727992b2ba/Readability.js",
+        "sha256":  "E9330028C8A5A4AA7D75147BE2605D520F7F213C7B28474947DC0E9C984E9BED",
+        "bytes":  90944
+    },
+    {
+        "repo":  "mozilla/readability",
+        "version":  "0.6.0",
+        "commit":  "ab4027a8b37669745016869a37a504727992b2ba",
+        "file":  "Readability-readerable.js",
+        "source":  "https://raw.githubusercontent.com/mozilla/readability/ab4027a8b37669745016869a37a504727992b2ba/Readability-readerable.js",
+        "sha256":  "E73600367067BE2DA322C0F26BE9C4EC7759CD01B630DBB57278C326E5B5ABA8",
+        "bytes":  4279
+    },
+    {
+        "repo":  "mozilla/readability",
+        "version":  "0.6.0",
+        "commit":  "ab4027a8b37669745016869a37a504727992b2ba",
+        "file":  "Readability-LICENSE.md",
+        "source":  "https://raw.githubusercontent.com/mozilla/readability/ab4027a8b37669745016869a37a504727992b2ba/LICENSE.md",
+        "sha256":  "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "bytes":  11358
+    },
+    {
+        "repo":  "mozilla/readability",
+        "version":  "0.6.0",
+        "commit":  "ab4027a8b37669745016869a37a504727992b2ba",
+        "file":  "Readability-NOTICE.txt",
+        "source":  "https://raw.githubusercontent.com/mozilla/readability/ab4027a8b37669745016869a37a504727992b2ba/NOTICE",
+        "sha256":  "21D526D361CAF2B1CA578820EF1113982DA5C094878A26BDD7AD555F84946F54",
+        "bytes":  90
+    },
+    {
+        "repo":  "cure53/DOMPurify",
+        "version":  "3.4.16",
+        "commit":  "18f8f0e3d8efe7e3c8d3d2679aebd0df72164ead",
+        "file":  "purify.min.js",
+        "source":  "https://raw.githubusercontent.com/cure53/DOMPurify/18f8f0e3d8efe7e3c8d3d2679aebd0df72164ead/dist/purify.min.js",
+        "sha256":  "1311D22C276E9C88A21811BAA747960B9FB44573B06ACC9E0F2AD8E82ECF6ED6",
+        "bytes":  28916
+    },
+    {
+        "repo":  "cure53/DOMPurify",
+        "version":  "3.4.16",
+        "commit":  "18f8f0e3d8efe7e3c8d3d2679aebd0df72164ead",
+        "file":  "DOMPurify-LICENSE.txt",
+        "source":  "https://raw.githubusercontent.com/cure53/DOMPurify/18f8f0e3d8efe7e3c8d3d2679aebd0df72164ead/LICENSE",
+        "sha256":  "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "bytes":  11358
+    }
+]

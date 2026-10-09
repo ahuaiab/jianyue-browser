@@ -1,6 +1,10 @@
 import { RectShape } from '@kit.ArkUI';
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
+import {
+  DEFAULT_READER_MODE_SETTINGS, ReaderModeSettings, ReaderModeTextSize, ReaderModeTheme
+} from '../model/ReaderMode';
+import { SiteSearchSuggestion } from '../model/SiteSearchModels';
 import { BrowserTabRecord, lastValidUrlForTab, PendingTabDraft, searchQueryForUrl } from '../model/BrowserTypes';
 import {
   SAFARI_ADDRESS_ITEM_GAP_VP,
@@ -74,6 +78,8 @@ export struct AddressTabStrip {
   @Param addressHandoffMounted: boolean = false;
   @Param addressHandoffProgress: number = 1;
   @Param downloadProgress: DownloadProgressSnapshot | undefined = undefined;
+  @Param pageLoadProgress: number = 0;
+  @Param pageLoadOpacity: number = 1;
   /** Shared page/chrome frame used while the address capsule leaves the bar. */
   @Param overviewTransitionActive: boolean = false;
   @Param overviewChromeFrame: TabOverviewChromeFrame | undefined = undefined;
@@ -81,6 +87,14 @@ export struct AddressTabStrip {
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
+  @Param readerAvailable: boolean = false;
+  @Param readerActive: boolean = false;
+  @Param readerSettings: ReaderModeSettings = DEFAULT_READER_MODE_SETTINGS;
+  @Param siteSearchSuggestion: SiteSearchSuggestion | undefined = undefined;
+  @Param onSiteSearch: (url: string) => void = (_url: string) => undefined;
+  @Param onReaderTextSize: (size: ReaderModeTextSize) => void = (_size: ReaderModeTextSize) => undefined;
+  @Param onReaderTheme: (theme: ReaderModeTheme) => void = (_theme: ReaderModeTheme) => undefined;
+  @Param onReaderAutoChange: (enabled: boolean) => void = (_enabled: boolean) => undefined;
   @Param onNavigate: (value: string) => void = (_value: string) => undefined;
   @Param onReload: () => void = () => undefined;
   @Param onOpenAddress: () => void = () => undefined;
@@ -292,7 +306,18 @@ export struct AddressTabStrip {
       inputIdentity: index === this.activeIndex ? this.activeInputIdentity : `address-input-${tab.id}`,
       selectedFontSize: this.selectedFontSize,
       webReady: index === this.activeIndex && this.webReady,
+      pageLoadProgress: index === this.activeIndex ? this.pageLoadProgress : 0,
+      pageLoadOpacity: index === this.activeIndex ? this.pageLoadOpacity : 1,
       desktopMode: index === this.activeIndex && this.desktopMode,
+      readerAvailable: index === this.activeIndex && this.readerAvailable,
+      readerActive: index === this.activeIndex && this.readerActive,
+      readerSettings: this.readerSettings,
+      isPrivate: this.isPrivate,
+      siteSearchSuggestion: index === this.activeIndex ? this.siteSearchSuggestion : undefined,
+      onSiteSearch: this.onSiteSearch,
+      onReaderTextSize: this.onReaderTextSize,
+      onReaderTheme: this.onReaderTheme,
+      onReaderAutoChange: this.onReaderAutoChange,
       downloadActive: addressSearchBarDownloadProps(
         addressTabStripDownloadSnapshotForItem(this.downloadProgress, index, this.activeIndex)
       ).downloadActive,

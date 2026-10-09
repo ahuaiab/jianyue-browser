@@ -1,7 +1,7 @@
 import { curves } from '@kit.ArkUI';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import {
-  safariImmersiveMaterialIfSupported,
-  safariImmersiveSurfaceBackgroundColor
+  safariOpaqueModalSurfaceBackgroundColor
 } from '../model/BrowserMaterial';
 import {
   availableBrowserSearchEngines,
@@ -242,7 +242,17 @@ export struct StartPageCustomizeSheet {
         .id(`${id}-toggle`)
         .selectedColor('#007AFF')
         .switchPointColor(Color.White)
-        .onChange(onChange);
+        .onChange((enabled: boolean) => {
+          const currentValue: boolean = id === 'start-page-favorites-toggle'
+            ? this.settings.showFavorites
+            : id === 'start-page-quick-website-search'
+              ? this.settings.quickWebsiteSearchEnabled
+              : value;
+          if (enabled !== currentValue) {
+            browserHaptics.light('start-page-setting-toggle');
+          }
+          onChange(enabled);
+        });
     }
       .id(id)
       .width('100%')
@@ -543,6 +553,12 @@ export struct StartPageCustomizeSheet {
               this.settings.showFavorites, (enabled: boolean) => {
                 this.updateSettings(this.settingWith(enabled, this.settings.showFrequentSites));
               });
+            this.toggleRow('start-page-quick-website-search', $r('sys.symbol.magnifyingglass'), '快速网站搜索',
+              this.settings.quickWebsiteSearchEnabled, (enabled: boolean) => {
+                const next: BrowserSettings = copyBrowserSettings(this.settings);
+                next.quickWebsiteSearchEnabled = enabled;
+                this.updateSettings(next);
+              });
             this.engineRow();
           }
             .width('100%')
@@ -561,7 +577,6 @@ export struct StartPageCustomizeSheet {
 
         }
           .width('100%')
-          .height('100%')
           .padding({ left: 12, right: 12, bottom: 24 });
       }
         .id('start-page-customize-scroll')
@@ -580,10 +595,9 @@ export struct StartPageCustomizeSheet {
         // Keep the editor just high enough to cover the start-page edit affordance;
         // the rest of the options remain reachable through the native Scroll.
       .height('56%')
-        .backgroundColor(safariImmersiveSurfaceBackgroundColor())
+        .backgroundColor(safariOpaqueModalSurfaceBackgroundColor())
         .borderRadius({ topLeft: HARMONY_RADIUS_SHEET, topRight: HARMONY_RADIUS_SHEET })
         .clip(true)
-        .systemMaterial(safariImmersiveMaterialIfSupported())
         .translate({ x: this.sheetHorizontalOffset(), y: this.sheetOffsetY, z: 0 })
         .parallelGesture(
           PanGesture({ direction: PanDirection.Down })

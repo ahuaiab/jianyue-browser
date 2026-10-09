@@ -2,6 +2,12 @@
 export enum BrowserSearchEngine {
   BING = 'bing',
   BAIDU = 'baidu',
+  SOGOU = 'sogou',
+  SO360 = '360',
+  GOOGLE = 'google',
+  YAHOO = 'yahoo',
+  DUCKDUCKGO = 'duckduckgo',
+  ECOSIA = 'ecosia',
   CUSTOM = 'custom'
 }
 
@@ -69,6 +75,7 @@ export enum StartPageAppearance {
 export interface BrowserSettings {
   searchEngine: BrowserSearchEngine;
   customSearchEngine?: CustomSearchEngine;
+  quickWebsiteSearchEnabled: boolean;
   autoCloseTabs: AutoCloseTabsPolicy;
   contentBlockingEnabled: boolean;
   showFavorites: boolean;
@@ -85,6 +92,7 @@ export interface BrowserSettings {
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   searchEngine: BrowserSearchEngine.BING,
   customSearchEngine: undefined,
+  quickWebsiteSearchEnabled: true,
   autoCloseTabs: AutoCloseTabsPolicy.ON_BROWSER_CLOSE,
   contentBlockingEnabled: false,
   showFavorites: false,
@@ -122,7 +130,16 @@ export function normalizeCustomSearchEngine(value: Object | undefined): CustomSe
 
 /** Search engines exposed by the settings UI; custom is shown after it is saved. */
 export function availableBrowserSearchEngines(custom?: CustomSearchEngine): BrowserSearchEngine[] {
-  const engines: BrowserSearchEngine[] = [BrowserSearchEngine.BING, BrowserSearchEngine.BAIDU];
+  const engines: BrowserSearchEngine[] = [
+    BrowserSearchEngine.BAIDU,
+    BrowserSearchEngine.SOGOU,
+    BrowserSearchEngine.SO360,
+    BrowserSearchEngine.BING,
+    BrowserSearchEngine.GOOGLE,
+    BrowserSearchEngine.YAHOO,
+    BrowserSearchEngine.DUCKDUCKGO,
+    BrowserSearchEngine.ECOSIA
+  ];
   if (custom !== undefined) {
     engines.push(BrowserSearchEngine.CUSTOM);
   }
@@ -138,6 +155,7 @@ export function copyBrowserSettings(settings: BrowserSettings): BrowserSettings 
         name: settings.customSearchEngine.name,
         urlTemplate: settings.customSearchEngine.urlTemplate
       },
+    quickWebsiteSearchEnabled: settings.quickWebsiteSearchEnabled !== false,
     autoCloseTabs: settings.autoCloseTabs,
     contentBlockingEnabled: settings.contentBlockingEnabled,
     showFavorites: settings.showFavorites,
@@ -163,8 +181,12 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
   const customSearchEngine: CustomSearchEngine | undefined = normalizeCustomSearchEngine(
     candidate.customSearchEngine as Object | undefined
   );
-  const searchEngine: BrowserSearchEngine = candidate.searchEngine === BrowserSearchEngine.BAIDU
-    ? BrowserSearchEngine.BAIDU
+  const builtInEngines: BrowserSearchEngine[] = availableBrowserSearchEngines();
+  const validBuiltInEngine: boolean = builtInEngines.some(
+    (engine: BrowserSearchEngine) => engine === candidate.searchEngine
+  );
+  const searchEngine: BrowserSearchEngine = validBuiltInEngine
+    ? candidate.searchEngine as BrowserSearchEngine
     : candidate.searchEngine === BrowserSearchEngine.CUSTOM && customSearchEngine !== undefined
       ? BrowserSearchEngine.CUSTOM
       : BrowserSearchEngine.BING;
@@ -184,6 +206,7 @@ export function normalizeBrowserSettings(value: Object | undefined): BrowserSett
   return {
     searchEngine,
     customSearchEngine,
+    quickWebsiteSearchEnabled: candidate.quickWebsiteSearchEnabled !== false,
     autoCloseTabs,
     contentBlockingEnabled: candidate.contentBlockingEnabled === true,
     showFavorites: sectionsConfigured && candidate.showFavorites === true,

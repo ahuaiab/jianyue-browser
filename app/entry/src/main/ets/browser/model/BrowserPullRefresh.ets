@@ -1,8 +1,7 @@
 export enum BrowserPullRefreshIndicatorMode {
   HIDDEN = 'hidden',
   PULLING = 'pulling',
-  READY = 'ready',
-  REFRESHING = 'refreshing'
+  READY = 'ready'
 }
 
 export interface BrowserPullRefreshContentTranslation {
@@ -57,15 +56,12 @@ export function browserPullRefreshProgressPercent(distance: number, revealHeight
   return browserPullRefreshOffset(distance, revealHeight) / revealHeight * 100;
 }
 
-/** Keep the pull ring determinate until the full blank-page reveal is exposed. */
+/** Keep the pull indicator tied to the drag, not the network request lifetime. */
 export function browserPullRefreshIndicatorMode(
   distance: number,
   revealHeight: number,
-  isRefreshing: boolean
+  _isRefreshing: boolean
 ): BrowserPullRefreshIndicatorMode {
-  if (isRefreshing) {
-    return BrowserPullRefreshIndicatorMode.REFRESHING;
-  }
   const offset: number = browserPullRefreshOffset(distance, revealHeight);
   if (offset <= 0) {
     return BrowserPullRefreshIndicatorMode.HIDDEN;

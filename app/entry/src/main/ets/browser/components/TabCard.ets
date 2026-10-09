@@ -12,6 +12,7 @@ import {
   tabOverviewLivePageCloseFrame
 } from '../model/TabOverviewActions';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import { HARMONY_RADIUS_CARD } from '../model/BrowserVisualMetrics';
 import {
   safariImmersiveMaterialIfSupported,
@@ -20,7 +21,7 @@ import {
 import { TopAlignedPixelMapImage } from './TopAlignedPixelMapImage';
 
 /**
- * A Safari-style tab card: the live page preview and its title/close row are
+ * A Safari-style tab card: the live page preview and its centered title are
  * one clipped rounded surface. Closing and reordering still delegate to
  * BrowserShell's shared gesture state machine; this component only owns the
  * card composition and gesture bridge.
@@ -141,6 +142,7 @@ export struct TabCard {
     this.gestureFinished = true;
     this.onCloseCancel(this.tab.id);
     this.menuShown = true;
+    browserHaptics.light('tab-card-long-press');
   }
 
   private finishLongPress(): void {
@@ -313,8 +315,7 @@ export struct TabCard {
         width: this.isActive ? 2 : 1,
         color: this.isActive ? '#007AFF' : '#E1E3E6'
       })
-      // Clip both children to this one outline so the thumbnail, caption and
-      // close action read as a single card instead of two stacked panels.
+      // Clip the thumbnail and centered caption to the same card outline.
       .clip(true);
     }
   }
@@ -329,34 +330,16 @@ export struct TabCard {
         .opacity(tabOverviewCardCaptionVisualOpacity(this.livePreview))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.Center)
         .layoutWeight(1);
-      // Keep the close action with the caption, below the thumbnail, matching
-      // the reference layout. The hit-test boundary prevents the card's
-      // parallel pan gesture from consuming a direct tap.
-      Button({ type: ButtonType.Normal, stateEffect: false }) {
-        SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(24)
-          .width(26)
-          .height(26)
-          .fontColor(['#69727C'])
-          .opacity(tabOverviewCardCaptionVisualOpacity(this.livePreview));
-      }
-        .id(`tab-close-button-${this.tab.id}`)
-        .width(28)
-        .height(28)
-        .padding(0)
-        .backgroundColor(Color.Transparent)
-        .stateEffect(false)
-        .onClick(() => this.onCloseTap(this.tab.id));
     }
       .id(`tab-card-caption-${this.tab.id}`)
       .width('100%')
       .height(32)
-      // The transformed live page paints the active caption. Keep this row's
-      // invisible close button in place so the settled card remains operable.
+      // The transformed live page paints the active caption.
       .backgroundColor(this.livePreview ? Color.Transparent : '#FFFFFF')
       .borderRadius({ bottomLeft: HARMONY_RADIUS_CARD, bottomRight: HARMONY_RADIUS_CARD })
-      .padding({ left: 12, right: 2 });
+      .padding({ left: 12, right: 12 });
   }
 
   build() {
@@ -366,7 +349,6 @@ export struct TabCard {
       .id(`tab-card-${this.tab.id}`)
       .width('100%')
       .height(this.cardHeight)
-      .opacity(this.closeFrame().opacity)
       .scale({
         x: this.closeScale(),
         y: this.closeScale(),

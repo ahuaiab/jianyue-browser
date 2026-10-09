@@ -1,3 +1,7 @@
+import readerModeTest from './ets/test/ReaderMode.test';
+import webScriptJsonTest from './ets/test/WebScriptJson.test';
+import siteSearchModelsTest from './ets/test/SiteSearchModels.test';
+import readerModeRepositoryTest from './ets/test/ReaderModeRepository.test';
 import tabStoreTest from './ets/test/TabStore.test';
 import gestureDecisionEngineTest from './ets/test/GestureDecisionEngine.test';
 import webTabPoolTest from './ets/test/WebTabPool.test';
@@ -27,9 +31,15 @@ import pageIconsTest from './ets/test/PageIcons.test';
 import externalAppNavigationTest from './ets/test/ExternalAppNavigation.test';
 import browserPullRefreshTest from './ets/test/BrowserPullRefresh.test';
 import browserLoadErrorPolicyTest from './ets/test/BrowserLoadErrorPolicy.test';
+import pageLoadProgressTest from './ets/test/PageLoadProgress.test';
 import googleSearchUserAgentTest from './ets/test/GoogleSearchUserAgent.test';
 
+import browserHapticFeedbackTest from './ets/test/BrowserHapticFeedback.test';
 export default function testsuite() {
+  readerModeTest();
+  webScriptJsonTest();
+  siteSearchModelsTest();
+  readerModeRepositoryTest();
   tabStoreTest();
   gestureDecisionEngineTest();
   webTabPoolTest();
@@ -59,5 +69,7 @@ export default function testsuite() {
   externalAppNavigationTest();
   browserPullRefreshTest();
   browserLoadErrorPolicyTest();
+  pageLoadProgressTest();
   googleSearchUserAgentTest();
+  browserHapticFeedbackTest();
 }

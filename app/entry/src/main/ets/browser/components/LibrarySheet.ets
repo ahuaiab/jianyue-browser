@@ -8,7 +8,6 @@ import {
   LIBRARY_SEARCH_PULL_THRESHOLD,
   LIBRARY_SEARCH_REVEAL_ANIMATION_DURATION_MS,
   LIBRARY_SHEET_HEIGHT_PERCENT,
-  libraryDismissProgress,
   libraryDismissShouldClose,
   libraryEntries,
   LibraryEntry,
@@ -22,10 +21,16 @@ import {
   librarySectionChrome,
   visibleHistoryRecords
 } from '../model/LibraryModels';
-import { BookmarkRecord, HistoryRecord } from '../model/BrowserTypes';
+import {
+  BookmarkRecord,
+  BookmarkFolderRecord,
+  HistoryRecord,
+  loadableUrlFor,
+  validateBrowserUrl
+} from '../model/BrowserTypes';
 import { PageIconRecord } from '../model/PageIconModels';
 import fileUri from '@ohos.file.fileuri';
-import { curves } from '@kit.ArkUI';
+import { curves, KeyboardAvoidMode as UIKeyboardAvoidMode } from '@kit.ArkUI';
 import {
   safariImmersiveMaterialIfSupported,
   safariOpaqueModalSurfaceBackgroundColor,
@@ -37,6 +42,7 @@ import {
   TAB_SEARCH_BAR_STYLE
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import {
   BROWSER_UI_ICON_CONTAINER_SIZE_VP,
   BROWSER_UI_ICON_SIZE_VP,
@@ -86,12 +92,17 @@ interface HistoryHeadingAnchor {
   title: string;
 }
 
+interface BookmarkFolderPopupStateEvent {
+  isVisible: boolean;
+}
+
 const HISTORY_REMOVAL_PHASE_VISIBLE: number = 0;
 const HISTORY_REMOVAL_PHASE_SLIDING: number = 1;
 const HISTORY_REMOVAL_PHASE_COLLAPSING: number = 2;
 const HISTORY_ROW_HEIGHT_VP: number = 65;
 const HISTORY_SLIDE_DURATION_MS: number = 220;
 const HISTORY_COLLAPSE_DURATION_MS: number = 180;
+const LIBRARY_EDITOR_TRANSITION_DURATION_MS: number = 220;
 
 @ComponentV2
 export struct LibrarySheet {
@@ -99,6 +110,7 @@ export struct LibrarySheet {
   /** Explicit invalidation token for async history changes in the parent shell. */
   @Param historyRevision: number = 0;
   @Param bookmarks: BookmarkRecord[] = [];
+  @Param bookmarkFolders: BookmarkFolderRecord[] = [];
   @Param pageIcons: PageIconRecord[] = [];
   @Param pageIconRevision: number = 0;
   @Param onMissingPageIcon: (url: string) => void = (_url: string) => undefined;
@@ -111,6 +123,11 @@ export struct LibrarySheet {
   @Param rightInset: number = 0;
   @Param chromeAnchor: BrowserChromeAnchor = BrowserChromeAnchor.CENTER;
   @Param onOpen: (url: string) => void = (_url: string) => undefined;
+  @Param onUpdateBookmark: (originalUrl: string, title: string, url: string,
+    folderId: string) => Promise<boolean> =
+    async (_originalUrl: string, _title: string, _url: string, _folderId: string) => false;
+  @Param onCreateBookmarkFolder: (name: string) => Promise<BookmarkFolderRecord | undefined> =
+    async (_name: string) => undefined;
   @Param onRemoveBookmark: (url: string) => void = (_url: string) => undefined;
   @Param onRemoveHistory: (entry: LibraryEntry) => void = (_entry: LibraryEntry) => undefined;
   @Param onDeleteHistoryRange: (range: HistoryDeleteRange) => void =
@@ -120,9 +137,24 @@ export struct LibrarySheet {
   @Local section: LibrarySection = LibrarySection.BOOKMARKS;
   @Local sectionProgress: number = 0;
   @Local editing: boolean = false;
+  @Local bookmarkEditVisible: boolean = false;
+  @Local bookmarkEditOriginalUrl: string = '';
+  @Local bookmarkTitleDraft: string = '';
+  @Local bookmarkUrlDraft: string = '';
+  @Local bookmarkLocationFolderId: string = '';
+  @Local bookmarkCurrentFolderId: string = '';
+  @Local bookmarkNewFolderName: string = '';
+  @Local bookmarkFolderCreateVisible: boolean = false;
+  @Local bookmarkLocationExpanded: boolean = false;
+  @Local pendingBookmarkFolders: BookmarkFolderRecord[] = [];
+  @Local bookmarkEditError: string = '';
+  @Local bookmarkFolderError: string = '';
+  @Local bookmarkEditSaving: boolean = false;
+  @Local bookmarkFolderCreating: boolean = false;
   @Local longPressEntryId: string = '';
   @Local menuEntryId: string = '';
   @Local suppressEntryClickId: string = '';
+  private suppressEntryClickGeneration: number = 0;
   @Local sheetSwipeOffset: number = 0;
   @Local sheetGestureActive: boolean = false;
   @Local searchQuery: string = '';
@@ -144,18 +176,28 @@ export struct LibrarySheet {
   @Local visibleHistoryItems: string[] = [];
   private historyRenderEntries: Map<string, LibraryEntry> = new Map();
   private historyRenderTitles: Map<string, string> = new Map();
-  private readonly bookmarkScroller: Scroller = new Scroller();
+  private readonly bookmarkScroller: ListScroller = new ListScroller();
+  private readonly bookmarkEditorScroller: Scroller = new Scroller();
   private readonly historyScroller: Scroller = new Scroller();
+  private bookmarkEditorFocusedField: string = '';
+  private bookmarkEditorFocusScrollGeneration: number = 0;
+  private bookmarkEditorPreviousKeyboardMode: UIKeyboardAvoidMode = UIKeyboardAvoidMode.OFFSET;
+  private bookmarkEditorKeyboardModeCaptured: boolean = false;
+  private bookmarkEditorKeyboardResizeApplied: boolean = false;
   private readonly sectionSwiperController: SwiperController = new SwiperController();
   private readonly sectionConnectorContext: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private sheetAnimationToken: number = 0;
   private searchAnimationToken: number = 0;
   private historyRemovalDisposed: boolean = false;
+  private bookmarkEditorDisposed: boolean = false;
+  private bookmarkEditGeneration: number = 0;
+  private bookmarkFolderCreateGeneration: number = 0;
   private historyRangeMenuDispatchLocked: boolean = false;
 
   aboutToAppear(): void {
     this.historyRemovalDisposed = false;
+    this.bookmarkEditorDisposed = false;
     this.syncVisibleHistoryGroups();
   }
 
@@ -163,6 +205,10 @@ export struct LibrarySheet {
     // Deletion callbacks have already been dispatched. Ignore late animation
     // completions after the sheet closes without undoing those operations.
     this.historyRemovalDisposed = true;
+    this.bookmarkEditorDisposed = true;
+    this.clearBookmarkEditorFocus();
+    this.restoreBookmarkEditorKeyboardMode();
+    this.bookmarkFolderCreateGeneration += 1;
   }
 
   @Monitor('historyRevision')
@@ -940,9 +986,209 @@ export struct LibrarySheet {
       .margin({ top: 12 * (1 - this.searchProgress()) });
   }
 
+  @Builder
+  private bookmarkFolderBackRow() {
+    Row({ space: 8 }) {
+      SymbolGlyph($r('sys.symbol.chevron_left'))
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .fontColor(['#8E8E93']);
+      Text(this.bookmarkFolderName(this.bookmarkCurrentFolderId))
+        .id('library-bookmark-folder-title')
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+        .fontColor('#1D1D1F');
+      Blank().layoutWeight(1);
+    }
+      .id('library-bookmark-folder-back')
+      .width('100%')
+      .height(36)
+      .padding({ left: 8, right: 8 })
+      .onClick(() => {
+        this.bookmarkCurrentFolderId = '';
+        this.searchQuery = '';
+      });
+  }
+
+  @Builder
+  private bookmarkFolderEntry(folder: BookmarkFolderRecord) {
+    Row({ space: 12 }) {
+      Text(folder.name)
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+        .fontColor('#1D1D1F')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis });
+      Blank().layoutWeight(1);
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(BROWSER_UI_ICON_SIZE_VP)
+        .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+        .fontColor(['#C7C7CC']);
+    }
+      .id(`library-bookmark-folder-${folder.id}`)
+      .width('100%')
+      .height(52)
+      .padding({ left: 8, right: 0 })
+      .onClick(() => {
+        this.bookmarkCurrentFolderId = folder.id;
+        this.searchQuery = '';
+      });
+  }
+
+  private bookmarkLocationOptionsHeight(): number {
+    return Math.min((this.bookmarkFoldersForDisplay().length + 1) * 44, 132);
+  }
+
+  private bookmarkLocationFrameHeight(): number {
+    return this.bookmarkLocationExpanded ? 98 + this.bookmarkLocationOptionsHeight() : 52;
+  }
+
+  private toggleBookmarkLocationMenu(): void {
+    this.bookmarkLocationExpanded = !this.bookmarkLocationExpanded;
+    if (this.bookmarkLocationExpanded) {
+      this.clearBookmarkEditorFocus();
+      // Keep the fixed-height editor viewport from clipping the newly expanded
+      // control; the folder list itself remains independently scrollable.
+      setTimeout(() => {
+        if (!this.bookmarkEditorDisposed && this.bookmarkEditVisible && this.bookmarkLocationExpanded) {
+          this.bookmarkEditorScroller.scrollEdge(Edge.Bottom);
+        }
+      }, 40);
+    }
+  }
+
+  private setBookmarkEditorFocus(field: string): void {
+    this.bookmarkEditorFocusedField = field;
+    this.bookmarkLocationExpanded = false;
+    this.scheduleBookmarkEditorFocusScroll();
+  }
+
+  private clearBookmarkEditorFieldFocus(field: string): void {
+    if (this.bookmarkEditorFocusedField === field) {
+      this.bookmarkEditorFocusedField = '';
+      this.bookmarkEditorFocusScrollGeneration += 1;
+    }
+  }
+
+  private clearBookmarkEditorFocus(): void {
+    this.bookmarkEditorFocusedField = '';
+    this.bookmarkEditorFocusScrollGeneration += 1;
+  }
+
+  private scheduleBookmarkEditorFocusScroll(): void {
+    const field: string = this.bookmarkEditorFocusedField;
+    const generation: number = ++this.bookmarkEditorFocusScrollGeneration;
+    if (field.length === 0) {
+      return;
+    }
+    setTimeout(() => {
+      if (this.bookmarkEditorDisposed || !this.bookmarkEditVisible ||
+        this.bookmarkEditorFocusedField !== field ||
+        this.bookmarkEditorFocusScrollGeneration !== generation) {
+        return;
+      }
+      this.bookmarkEditorScroller.scrollTo({
+        xOffset: 0,
+        yOffset: field === 'url' ? 54 : 0,
+        animation: false
+      });
+    }, 40);
+  }
+
+  private handleBookmarkEditorAreaChange(oldArea: Area, newArea: Area): void {
+    if (oldArea.height !== newArea.height && this.bookmarkEditorFocusedField.length > 0) {
+      this.scheduleBookmarkEditorFocusScroll();
+    }
+  }
+
+  private useResizeForBookmarkEditor(): void {
+    if (this.bookmarkEditorKeyboardModeCaptured) {
+      return;
+    }
+    const uiContext = this.getUIContext();
+    this.bookmarkEditorPreviousKeyboardMode = uiContext.getKeyboardAvoidMode();
+    this.bookmarkEditorKeyboardModeCaptured = true;
+    this.bookmarkEditorKeyboardResizeApplied =
+      this.bookmarkEditorPreviousKeyboardMode !== UIKeyboardAvoidMode.RESIZE;
+    if (this.bookmarkEditorKeyboardResizeApplied) {
+      uiContext.setKeyboardAvoidMode(UIKeyboardAvoidMode.RESIZE);
+    }
+  }
+
+  private restoreBookmarkEditorKeyboardMode(): void {
+    if (!this.bookmarkEditorKeyboardModeCaptured) {
+      return;
+    }
+    const uiContext = this.getUIContext();
+    if (this.bookmarkEditorKeyboardResizeApplied &&
+      uiContext.getKeyboardAvoidMode() === UIKeyboardAvoidMode.RESIZE) {
+      uiContext.setKeyboardAvoidMode(this.bookmarkEditorPreviousKeyboardMode);
+    }
+    this.bookmarkEditorKeyboardModeCaptured = false;
+    this.bookmarkEditorKeyboardResizeApplied = false;
+    this.bookmarkEditorPreviousKeyboardMode = UIKeyboardAvoidMode.OFFSET;
+  }
+
+  private selectBookmarkLocationFolder(folderId: string): void {
+    this.bookmarkLocationFolderId = this.hasBookmarkFolder(folderId) ? folderId : '';
+    this.bookmarkLocationExpanded = false;
+    this.clearBookmarkEditorFocus();
+    this.bookmarkFolderError = '';
+  }
+
+  private beginBookmarkFolderCreateFromMenu(): void {
+    this.bookmarkLocationExpanded = false;
+    this.clearBookmarkEditorFocus();
+    this.bookmarkFolderCreateVisible = true;
+    this.bookmarkNewFolderName = '';
+    this.bookmarkFolderError = '';
+  }
+
+  private hasBookmarkFolder(folderId: string): boolean {
+    return folderId.length > 0 && this.bookmarkFoldersForDisplay().some((folder: BookmarkFolderRecord) =>
+      folder.id === folderId);
+  }
+
+  private bookmarkFolderName(folderId: string): string {
+    const folder: BookmarkFolderRecord | undefined = this.bookmarkFoldersForDisplay().find(
+      (item: BookmarkFolderRecord) => item.id === folderId);
+    return folder?.name ?? '书签';
+  }
+
+  private bookmarkFoldersForDisplay(): BookmarkFolderRecord[] {
+    const folders: BookmarkFolderRecord[] = this.bookmarkFolders.slice();
+    this.pendingBookmarkFolders.forEach((pending: BookmarkFolderRecord) => {
+      if (!folders.some((folder: BookmarkFolderRecord) => folder.id === pending.id)) {
+        folders.push(pending);
+      }
+    });
+    return folders;
+  }
+
+  private bookmarkRecordFolderId(url: string): string {
+    const bookmark: BookmarkRecord | undefined = this.bookmarks.find((item: BookmarkRecord) =>
+      item.url === url);
+    const folderId: string = bookmark?.folderId ?? '';
+    return this.hasBookmarkFolder(folderId) ? folderId : '';
+  }
+
+  private editorFieldWidth(): number {
+    return libraryListWidth(libraryContentCardWidth(this.sheetWidth()));
+  }
+
   private entries(section: LibrarySection): LibraryEntry[] {
     void this.pageIconRevision;
-    return libraryEntries(section, this.history, this.bookmarks, this.pageIcons);
+    const entries: LibraryEntry[] = libraryEntries(section, this.history, this.bookmarks, this.pageIcons);
+    if (section !== LibrarySection.BOOKMARKS) {
+      return entries;
+    }
+    const folderId: string = this.hasBookmarkFolder(this.bookmarkCurrentFolderId)
+      ? this.bookmarkCurrentFolderId
+      : '';
+    if (folderId.length === 0 && this.searchQuery.trim().length > 0) {
+      return entries;
+    }
+    return entries.filter((entry: LibraryEntry) => this.bookmarkRecordFolderId(entry.url) === folderId);
   }
 
   private filteredEntries(section: LibrarySection): LibraryEntry[] {
@@ -1056,12 +1302,19 @@ export struct LibrarySheet {
   }
 
   private beginEntryLongPress(entry: LibraryEntry): void {
-    if (entry.section !== LibrarySection.HISTORY) {
-      return;
-    }
     this.longPressEntryId = entry.id;
     this.menuEntryId = entry.id;
-    this.suppressEntryClickId = entry.id;
+    this.suppressNextEntryClick(entry.id);
+  }
+
+  private suppressNextEntryClick(entryId: string): void {
+    this.suppressEntryClickId = entryId;
+    const generation: number = ++this.suppressEntryClickGeneration;
+    setTimeout(() => {
+      if (generation === this.suppressEntryClickGeneration && this.suppressEntryClickId === entryId) {
+        this.suppressEntryClickId = '';
+      }
+    }, 450);
   }
 
   private endEntryLongPress(entryId: string): void {
@@ -1079,18 +1332,192 @@ export struct LibrarySheet {
     if (this.longPressEntryId === entryId) {
       this.longPressEntryId = '';
     }
-    if (this.suppressEntryClickId === entryId) {
-      this.suppressEntryClickId = '';
-    }
+    this.suppressNextEntryClick(entryId);
   }
 
   private handleEntryClick(entry: LibraryEntry): void {
     if (this.suppressEntryClickId === entry.id) {
       this.suppressEntryClickId = '';
+      this.suppressEntryClickGeneration += 1;
       return;
     }
-    if (!this.editing) {
+    if (entry.section === LibrarySection.BOOKMARKS || !this.editing) {
       this.onOpen(entry.url);
+    }
+  }
+
+  private beginBookmarkEdit(entry: LibraryEntry): void {
+    if (entry.section !== LibrarySection.BOOKMARKS || this.bookmarkEditSaving) {
+      return;
+    }
+    this.bookmarkEditOriginalUrl = entry.url;
+    this.bookmarkEditGeneration += 1;
+    this.bookmarkFolderCreateGeneration += 1;
+    this.bookmarkTitleDraft = entry.title;
+    this.bookmarkUrlDraft = entry.url;
+    this.bookmarkLocationFolderId = this.bookmarkRecordFolderId(entry.url);
+    this.bookmarkNewFolderName = '';
+    this.bookmarkEditError = '';
+    this.bookmarkFolderError = '';
+    this.bookmarkFolderCreating = false;
+    this.bookmarkFolderCreateVisible = false;
+    this.bookmarkLocationExpanded = false;
+    this.clearBookmarkEditorFocus();
+    this.useResizeForBookmarkEditor();
+    this.bookmarkEditVisible = true;
+  }
+
+  private async createBookmarkFolder(): Promise<void> {
+    if (this.bookmarkFolderCreating || this.bookmarkEditSaving) {
+      return;
+    }
+    const name: string = this.bookmarkNewFolderName.trim();
+    if (name.length === 0) {
+      this.bookmarkFolderError = '请输入文件夹名称';
+      return;
+    }
+    if (name.length > 60) {
+      this.bookmarkFolderError = '文件夹名称不能超过 60 个字符';
+      return;
+    }
+    if (name === '书签') {
+      this.bookmarkFolderError = '“书签”是默认位置名称';
+      return;
+    }
+    if (this.bookmarkFoldersForDisplay().some((folder: BookmarkFolderRecord) => folder.name === name)) {
+      this.bookmarkFolderError = '已有同名文件夹';
+      return;
+    }
+    this.bookmarkFolderCreating = true;
+    this.bookmarkFolderError = '';
+    const createGeneration: number = ++this.bookmarkFolderCreateGeneration;
+    const editGeneration: number = this.bookmarkEditGeneration;
+    const originalUrl: string = this.bookmarkEditOriginalUrl;
+    try {
+      const folder: BookmarkFolderRecord | undefined = await this.onCreateBookmarkFolder(name);
+      if (this.bookmarkEditorDisposed) {
+        return;
+      }
+      if (folder === undefined) {
+        if (this.bookmarkFolderCreateGeneration === createGeneration &&
+          this.bookmarkFolderCreateVisible && this.bookmarkEditGeneration === editGeneration &&
+          this.bookmarkEditOriginalUrl === originalUrl) {
+          this.bookmarkFolderError = '创建失败，请稍后重试';
+        }
+        return;
+      }
+      if (!this.bookmarkFolders.some((item: BookmarkFolderRecord) => item.id === folder.id) &&
+        !this.pendingBookmarkFolders.some((item: BookmarkFolderRecord) => item.id === folder.id)) {
+        this.pendingBookmarkFolders = [...this.pendingBookmarkFolders, folder];
+      }
+      if (this.bookmarkFolderCreateGeneration === createGeneration &&
+        this.bookmarkFolderCreateVisible && this.bookmarkEditVisible &&
+        this.bookmarkEditGeneration === editGeneration &&
+        this.bookmarkEditOriginalUrl === originalUrl) {
+        this.bookmarkLocationFolderId = folder.id;
+        this.bookmarkLocationExpanded = false;
+        this.bookmarkNewFolderName = '';
+        this.bookmarkFolderError = '';
+        this.bookmarkFolderCreateVisible = false;
+      }
+    } catch (_error) {
+      if (this.bookmarkFolderCreateGeneration === createGeneration &&
+        this.bookmarkFolderCreateVisible && this.bookmarkEditGeneration === editGeneration &&
+        this.bookmarkEditOriginalUrl === originalUrl) {
+        this.bookmarkFolderError = '创建失败，请稍后重试';
+      }
+    } finally {
+      if (this.bookmarkFolderCreateGeneration === createGeneration) {
+        this.bookmarkFolderCreating = false;
+      }
+    }
+  }
+
+  private cancelBookmarkFolderCreateDialog(): void {
+    this.bookmarkFolderCreateGeneration += 1;
+    this.bookmarkFolderCreateVisible = false;
+    this.bookmarkLocationExpanded = false;
+    this.bookmarkFolderCreating = false;
+    this.bookmarkNewFolderName = '';
+    this.bookmarkFolderError = '';
+  }
+
+  private handleBookmarkFolderPopupStateChange(isVisible: boolean): void {
+    if (!isVisible && this.bookmarkFolderCreateVisible) {
+      this.cancelBookmarkFolderCreateDialog();
+    }
+  }
+
+  private cancelBookmarkEdit(): void {
+    if (this.bookmarkEditSaving) {
+      return;
+    }
+    this.bookmarkEditGeneration += 1;
+    this.bookmarkFolderCreateGeneration += 1;
+    this.bookmarkFolderCreateVisible = false;
+    this.bookmarkLocationExpanded = false;
+    this.clearBookmarkEditorFocus();
+    this.restoreBookmarkEditorKeyboardMode();
+    this.bookmarkFolderCreating = false;
+    this.bookmarkEditVisible = false;
+  }
+
+  private finishBookmarkEditorTransition(transitionIn: boolean): void {
+    if (transitionIn || this.bookmarkEditVisible || this.bookmarkEditorDisposed) {
+      return;
+    }
+    this.bookmarkEditOriginalUrl = '';
+    this.bookmarkTitleDraft = '';
+    this.bookmarkUrlDraft = '';
+    this.bookmarkLocationFolderId = '';
+    this.bookmarkLocationExpanded = false;
+    this.clearBookmarkEditorFocus();
+    this.restoreBookmarkEditorKeyboardMode();
+    this.bookmarkNewFolderName = '';
+    this.bookmarkFolderCreateVisible = false;
+    this.bookmarkFolderCreateGeneration += 1;
+    this.bookmarkFolderCreating = false;
+    this.bookmarkEditError = '';
+    this.bookmarkFolderError = '';
+  }
+
+  private async saveBookmarkEdit(): Promise<void> {
+    if (this.bookmarkEditSaving || this.bookmarkFolderCreating) {
+      return;
+    }
+    const validation = validateBrowserUrl(this.bookmarkUrlDraft);
+    const url: string | undefined = loadableUrlFor(this.bookmarkUrlDraft);
+    if (!validation.valid || (validation.urlScheme !== 'http' && validation.urlScheme !== 'https') ||
+      url === undefined) {
+      this.bookmarkEditError = '请输入有效的 HTTP 或 HTTPS 网址';
+      return;
+    }
+    const title: string = this.bookmarkTitleDraft.trim() || url;
+    this.bookmarkEditSaving = true;
+    this.bookmarkEditError = '';
+    try {
+      const folderId: string = this.hasBookmarkFolder(this.bookmarkLocationFolderId)
+        ? this.bookmarkLocationFolderId
+        : '';
+      const saved: boolean = await this.onUpdateBookmark(
+        this.bookmarkEditOriginalUrl, title, url, folderId);
+      if (saved) {
+        browserHaptics.light('bookmark-edit-save');
+        this.bookmarkCurrentFolderId = folderId;
+        this.bookmarkFolderCreateGeneration += 1;
+        this.bookmarkFolderCreateVisible = false;
+        this.bookmarkLocationExpanded = false;
+        this.clearBookmarkEditorFocus();
+        this.restoreBookmarkEditorKeyboardMode();
+        this.bookmarkFolderCreating = false;
+        this.bookmarkEditVisible = false;
+        return;
+      }
+      this.bookmarkEditError = '保存失败，请检查网址是否重复或有效';
+    } catch (_error) {
+      this.bookmarkEditError = '保存失败，请稍后重试';
+    } finally {
+      this.bookmarkEditSaving = false;
     }
   }
 
@@ -1156,22 +1583,39 @@ export struct LibrarySheet {
   }
 
   @Builder
-  private historyMenu(entry: LibraryEntry) {
+  private entryMenu(entry: LibraryEntry) {
     Menu() {
-      MenuItem({ content: '打开' })
-        .onChange((selected: boolean) => {
-          if (selected) {
-            this.onOpen(entry.url);
-            this.dismissEntryMenu(entry.id);
-          }
-        })
-      MenuItem({ content: '删除' })
-        .onChange((selected: boolean) => {
-          if (selected) {
-            this.removeEntry(entry);
-            this.dismissEntryMenu(entry.id);
-          }
-        })
+      if (entry.section === LibrarySection.BOOKMARKS) {
+        MenuItem({ content: '编辑' })
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.beginBookmarkEdit(entry);
+            }
+          });
+        MenuItem({ content: '删除' })
+          .contentFontColor('#FF3B30')
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.removeEntry(entry);
+              this.dismissEntryMenu(entry.id);
+            }
+          });
+      } else {
+        MenuItem({ content: '打开' })
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.onOpen(entry.url);
+              this.dismissEntryMenu(entry.id);
+            }
+          });
+        MenuItem({ content: '删除' })
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.removeEntry(entry);
+              this.dismissEntryMenu(entry.id);
+            }
+          });
+      }
     }
   }
 
@@ -1212,7 +1656,7 @@ export struct LibrarySheet {
   private entryRow(entry: LibraryEntry) {
     Column() {
       Row({ space: 12 }) {
-        if (this.editing) {
+        if (this.editing && entry.section === LibrarySection.HISTORY) {
           Button({ type: ButtonType.Normal, stateEffect: false }) {
             SymbolGlyph($r('sys.symbol.minus_circle_fill'))
               .fontSize(BROWSER_UI_ICON_SIZE_VP)
@@ -1302,7 +1746,7 @@ export struct LibrarySheet {
         ).animation({ duration: 180, curve: Curve.EaseOut })
       )
       .onClick(() => this.handleEntryClick(entry))
-      .bindContextMenu(this.menuEntryId === entry.id, this.historyMenu(entry), {
+      .bindContextMenu(this.menuEntryId === entry.id, this.entryMenu(entry), {
         placement: Placement.TopRight,
         systemMaterial: safariImmersiveMaterialIfSupported(),
         onDisappear: () => this.dismissEntryMenu(entry.id)
@@ -1313,6 +1757,106 @@ export struct LibrarySheet {
           .onActionEnd(() => this.endEntryLongPress(entry.id))
           .onActionCancel(() => this.endEntryLongPress(entry.id))
       );
+  }
+
+  @Builder
+  private bookmarkEntryRow(entry: LibraryEntry) {
+    Column() {
+      Row({ space: 12 }) {
+        Stack() {
+          this.entryIcon(entry, LIBRARY_SITE_ICON_SIZE);
+        }
+          .width(LIBRARY_SITE_ICON_SLOT_SIZE)
+          .height(LIBRARY_SITE_ICON_SLOT_SIZE)
+          .alignContent(Alignment.Center);
+        Column({ space: 2 }) {
+          Text(entry.title)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#1D1D1F')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%');
+        }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start);
+      }
+        .width('100%')
+        .height(52)
+        .alignItems(VerticalAlign.Center);
+      Row()
+        .width('100%')
+        .height(1)
+        .margin({ left: 44 })
+        .backgroundColor('#E5E5EA');
+    }
+      .id(`library-entry-${entry.id}`)
+      .width('100%')
+      .padding({ left: 8, right: 0 })
+      .backgroundColor(Color.Transparent)
+      .transition(
+        TransitionEffect.asymmetric(
+          // The editor swaps out the list subtree; avoid animating every row
+          // back in while keeping the existing swipe-delete exit feedback.
+          TransitionEffect.IDENTITY,
+          TransitionEffect.OPACITY.combine(TransitionEffect.move(TransitionEdge.END))
+        ).animation({ duration: 180, curve: Curve.EaseOut })
+      )
+      .onClick(() => {
+        this.bookmarkScroller.closeAllSwipeActions();
+        this.handleEntryClick(entry);
+      })
+      .gesture(
+        LongPressGesture({ duration: 300 })
+          .onAction(() => this.suppressNextEntryClick(entry.id))
+      );
+  }
+
+  @Builder
+  private bookmarkSwipeActions(entry: LibraryEntry) {
+    Row() {
+      Button({ type: ButtonType.Normal, stateEffect: false }) {
+        SymbolGlyph($r('sys.symbol.pencil_line'))
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .fontColor(['#007AFF']);
+      }
+        .id(`library-bookmark-swipe-edit-${entry.id}`)
+        .width(48)
+        .height(52)
+        .padding(0)
+        .backgroundColor(Color.Transparent)
+        .stateEffect(false)
+        .accessibilityText('编辑')
+        .onClick(() => {
+          this.bookmarkScroller.closeAllSwipeActions();
+          if (this.bookmarkEditSaving) {
+            return;
+          }
+          this.beginBookmarkEdit(entry);
+          browserHaptics.light('bookmark-edit-open');
+        });
+      Button({ type: ButtonType.Normal, stateEffect: false }) {
+        SymbolGlyph($r('sys.symbol.trash'))
+          .fontSize(BROWSER_UI_ICON_SIZE_VP)
+          .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+          .fontColor(['#FF3B30']);
+      }
+        .id(`library-bookmark-swipe-delete-${entry.id}`)
+        .width(48)
+        .height(52)
+        .padding(0)
+        .backgroundColor(Color.Transparent)
+        .stateEffect(false)
+        .accessibilityText('删除')
+        .onClick(() => {
+          this.bookmarkScroller.closeAllSwipeActions();
+          this.removeEntry(entry);
+        });
+    }
+      .width(96)
+      .height(52);
   }
 
   @Builder
@@ -1418,27 +1962,43 @@ export struct LibrarySheet {
 
   @Builder
   private bookmarkContent() {
-    Scroll(this.bookmarkScroller) {
-      Column() {
+    List({ scroller: this.bookmarkScroller }) {
+      if (!this.hasBookmarkFolder(this.bookmarkCurrentFolderId)) {
         if (this.searchQuery.trim().length === 0) {
-          this.bookmarkFolderRow();
+          ListItem() {
+            this.bookmarkFolderRow();
+          }
+          ForEach(this.bookmarkFoldersForDisplay(), (folder: BookmarkFolderRecord) => {
+            ListItem() {
+              this.bookmarkFolderEntry(folder);
+            }
+          }, (folder: BookmarkFolderRecord) => folder.id);
         }
-        ForEach(this.filteredEntries(LibrarySection.BOOKMARKS), (entry: LibraryEntry) => {
-          this.entryRow(entry);
-        }, (entry: LibraryEntry) => entry.id);
+      } else {
+        ListItem() {
+          this.bookmarkFolderBackRow();
+        }
       }
-        .width('100%')
-        // Scroll stretches its child to the viewport on the preview/device
-        // renderer. Pin the content column to the top so the first folder
-        // row stays directly below the segmented tabs instead of appearing
-        // in the vertical middle of the sheet.
-        .height('100%')
-        .justifyContent(FlexAlign.Start)
-        .alignItems(HorizontalAlign.Start);
+      ForEach(this.filteredEntries(LibrarySection.BOOKMARKS), (entry: LibraryEntry) => {
+        ListItem() {
+          this.bookmarkEntryRow(entry);
+        }
+          .swipeAction({
+            end: () => {
+              this.bookmarkSwipeActions(entry);
+            },
+            edgeEffect: SwipeEdgeEffect.None
+          });
+      }, (entry: LibraryEntry) => {
+        // A rename keeps the URL-based row ID; include the title so a cached
+        // transition row cannot keep rendering the previous bookmark name.
+        return JSON.stringify([entry.id, entry.title]);
+      });
     }
       .id('library-entry-scroll-bookmarks')
       .onTouch((event?: TouchEvent) => this.handleLibraryScrollTouch(event))
       .width(libraryListWidth(libraryContentCardWidth(this.sheetWidth())))
+      .align(Alignment.TopStart)
       .alignSelf(ItemAlign.Center)
       .layoutWeight(1)
       .scrollBar(BarState.Off)
@@ -1577,6 +2137,318 @@ export struct LibrarySheet {
   }
 
   @Builder
+  private bookmarkFolderSelect() {
+    Column() {
+      Button({ type: ButtonType.Normal, stateEffect: false }) {
+        Row() {
+          Text(this.bookmarkFolderName(this.bookmarkLocationFolderId))
+            .layoutWeight(1)
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#1D1D1F')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(BROWSER_UI_ICON_SIZE_VP)
+            .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+            .fontColor(['#8E8E93'])
+            .rotate({ angle: this.bookmarkLocationExpanded ? 270 : 90 });
+        }
+          .width('100%')
+          .height('100%')
+          .alignItems(VerticalAlign.Center);
+      }
+        .id('library-bookmark-location-select')
+        .width('100%')
+        .height(52)
+        .padding({ left: 12, right: 12 })
+        .backgroundColor(Color.Transparent)
+        .stateEffect(false)
+        .focusOnTouch(true)
+        .enabled(!this.bookmarkEditSaving && !this.bookmarkFolderCreating)
+        .onClick(() => this.toggleBookmarkLocationMenu());
+
+      if (this.bookmarkLocationExpanded) {
+        Divider()
+          .width('100%')
+          .height(1)
+          .color('#D1D1D6');
+        Scroll() {
+          Column() {
+            this.bookmarkLocationOption('', '书签');
+            ForEach(this.bookmarkFoldersForDisplay(), (folder: BookmarkFolderRecord) => {
+              this.bookmarkLocationOption(folder.id, folder.name);
+            }, (folder: BookmarkFolderRecord) => folder.id);
+          }
+            .width('100%');
+        }
+          .id('library-bookmark-location-menu')
+          .width('100%')
+          .height(this.bookmarkLocationOptionsHeight())
+          .scrollBar(BarState.Off);
+        Divider()
+          .width('100%')
+          .height(1)
+          .color('#D1D1D6');
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Row() {
+            Text('新建文件夹…')
+              .width('100%')
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+              .fontColor('#007AFF');
+          }
+            .width('100%')
+            .height('100%')
+            .alignItems(VerticalAlign.Center);
+        }
+          .id('library-bookmark-location-create-action')
+          .width('100%')
+          .height(44)
+          .padding({ left: 12, right: 12 })
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .enabled(!this.bookmarkEditSaving && !this.bookmarkFolderCreating)
+          .onClick(() => this.beginBookmarkFolderCreateFromMenu());
+      }
+    }
+      .id('library-bookmark-location-frame')
+      .width(this.editorFieldWidth())
+      .height(this.bookmarkLocationFrameHeight())
+      .backgroundColor('#FFFFFF')
+      .borderRadius(HARMONY_RADIUS_CONTROL)
+      .border({ width: 1, color: '#D1D1D6', radius: HARMONY_RADIUS_CONTROL })
+      .clip(true)
+      .bindPopup(this.bookmarkFolderCreateVisible, {
+        builder: this.bookmarkFolderCreateDialog,
+        placement: Placement.Top,
+        enableArrow: false,
+        autoCancel: false,
+        focusable: true,
+        backgroundBlurStyle: BlurStyle.NONE,
+        mask: { color: '#66000000' },
+        keyboardAvoidMode: KeyboardAvoidMode.DEFAULT,
+        onStateChange: (event: BookmarkFolderPopupStateEvent) =>
+          this.handleBookmarkFolderPopupStateChange(event.isVisible)
+      });
+  }
+
+  @Builder
+  private bookmarkLocationOption(folderId: string, title: string) {
+    Button({ type: ButtonType.Normal, stateEffect: false }) {
+      Row() {
+        Text(title)
+          .layoutWeight(1)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+          .fontColor(this.bookmarkLocationFolderId === folderId ? '#007AFF' : '#1D1D1F')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+        .width('100%')
+        .height('100%')
+        .alignItems(VerticalAlign.Center);
+    }
+      .id(folderId.length === 0
+        ? 'library-bookmark-location-option-root'
+        : `library-bookmark-location-option-${folderId}`)
+      .width('100%')
+      .height(44)
+      .padding({ left: 12, right: 12 })
+      .backgroundColor('#FFFFFF')
+      .stateEffect(false)
+      .enabled(!this.bookmarkEditSaving && !this.bookmarkFolderCreating)
+      .onClick(() => this.selectBookmarkLocationFolder(folderId));
+  }
+
+  @Builder
+  private bookmarkFolderCreateDialog() {
+    Column({ space: 12 }) {
+      Text('新建文件夹')
+        .id('library-bookmark-folder-create-title')
+        .width('100%')
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#1D1D1F')
+        .textAlign(TextAlign.Center);
+      TextInput({ text: this.bookmarkNewFolderName, placeholder: '文件夹名称' })
+        .id('library-bookmark-folder-name-input')
+        .width('100%')
+        .height(52)
+        .padding({ left: 12, right: 12 })
+        .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+        .fontColor('#1D1D1F')
+        .placeholderColor('#8E8E93')
+        .backgroundColor('#FFFFFF')
+        .borderRadius(HARMONY_RADIUS_CONTROL)
+        .border({ width: 1, color: '#D1D1D6', radius: HARMONY_RADIUS_CONTROL })
+        .onChange((value: string) => this.bookmarkNewFolderName = value);
+      if (this.bookmarkFolderError.length > 0) {
+        Text(this.bookmarkFolderError)
+          .id('library-bookmark-folder-error')
+          .width('100%')
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+          .fontColor('#FF3B30');
+      }
+      Row({ space: 8 }) {
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text('取消')
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#6B6B72');
+        }
+          .id('library-bookmark-folder-cancel')
+          .layoutWeight(1)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .onClick(() => this.cancelBookmarkFolderCreateDialog());
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text(this.bookmarkFolderCreating ? '创建中' : '创建')
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor(this.bookmarkFolderCreating ? '#8E8E93' : '#007AFF');
+        }
+          .id('library-bookmark-create-folder')
+          .layoutWeight(1)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .enabled(!this.bookmarkFolderCreating && !this.bookmarkEditSaving)
+          .onClick(() => { void this.createBookmarkFolder(); });
+      }
+        .width('100%')
+        .alignItems(VerticalAlign.Center);
+    }
+      .id('library-bookmark-folder-create-popup')
+      .width(this.editorFieldWidth() + 32)
+      .padding({ left: 16, right: 16, top: 16, bottom: 16 })
+      .backgroundColor('#FFFFFF')
+      .borderRadius(HARMONY_RADIUS_FLOATING)
+      .border({ width: 1, color: '#D1D1D6', radius: HARMONY_RADIUS_FLOATING });
+  }
+
+  @Builder
+  private bookmarkEditorContent() {
+    Column() {
+      Blank()
+        .width('100%')
+        .height(this.topContentInset());
+      Row() {
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text('取消')
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor('#007AFF');
+        }
+          .id('library-bookmark-cancel')
+          .width(64)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .enabled(!this.bookmarkEditSaving)
+          .onClick(() => this.cancelBookmarkEdit());
+        Text('编辑书签')
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1D1D1F')
+          .layoutWeight(1)
+          .textAlign(TextAlign.Center);
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text(this.bookmarkEditSaving ? '保存中' : '保存')
+            .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+            .fontColor(this.bookmarkEditSaving ? '#8E8E93' : '#007AFF');
+        }
+          .id('library-bookmark-save')
+          .width(64)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .stateEffect(false)
+          .enabled(!this.bookmarkEditSaving && !this.bookmarkFolderCreating)
+          .onClick(() => { void this.saveBookmarkEdit(); });
+      }
+        .id('library-bookmark-editor-header')
+        .width('100%')
+        .height(48)
+        .padding({ left: 8, right: 8 });
+
+      if (this.bookmarkEditError.length > 0) {
+        Text(this.bookmarkEditError)
+          .width(this.editorFieldWidth())
+          .alignSelf(ItemAlign.Center)
+          .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+          .fontColor('#FF3B30')
+          .padding({ left: 12, right: 12, top: 8, bottom: 4 });
+      }
+
+      Scroll(this.bookmarkEditorScroller) {
+        Column({ space: 12 }) {
+          Column() {
+            TextInput({ text: this.bookmarkTitleDraft, placeholder: '名称' })
+              .id('library-bookmark-title-input')
+              .width('100%')
+              .height(52)
+              .padding({ left: 16, right: 16 })
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+              .fontColor('#1D1D1F')
+              .placeholderColor('#8E8E93')
+              .backgroundColor(Color.Transparent)
+              .borderRadius(0)
+              .border({ width: 0, color: Color.Transparent, radius: 0 })
+              .onFocus(() => this.setBookmarkEditorFocus('title'))
+              .onBlur(() => this.clearBookmarkEditorFieldFocus('title'))
+              .onChange((value: string) => this.bookmarkTitleDraft = value);
+            Divider()
+              .width('100%')
+              .height(1)
+              .color('#D1D1D6');
+            TextInput({ text: this.bookmarkUrlDraft, placeholder: 'https://example.com' })
+              .id('library-bookmark-url-input')
+              .width('100%')
+              .height(52)
+              .padding({ left: 16, right: 16 })
+              .fontSize(BROWSER_UI_TEXT_SIZE_VP)
+              .fontColor('#1D1D1F')
+              .placeholderColor('#8E8E93')
+              .backgroundColor(Color.Transparent)
+              .borderRadius(0)
+              .border({ width: 0, color: Color.Transparent, radius: 0 })
+              .onFocus(() => this.setBookmarkEditorFocus('url'))
+              .onBlur(() => this.clearBookmarkEditorFieldFocus('url'))
+              .onChange((value: string) => this.bookmarkUrlDraft = value);
+          }
+            .id('library-bookmark-details-group')
+            .width(this.editorFieldWidth())
+            .height(107)
+            .backgroundColor('#FFFFFF')
+            .borderRadius(HARMONY_RADIUS_CONTROL)
+            .border({ width: 1, color: '#D1D1D6', radius: HARMONY_RADIUS_CONTROL })
+            .clip(true);
+          this.bookmarkFolderSelect();
+        }
+          .width(this.editorFieldWidth())
+          .justifyContent(FlexAlign.Start)
+          .alignItems(HorizontalAlign.Start)
+          .padding({ top: 16, bottom: 24 });
+      }
+        .id('library-bookmark-editor-scroll')
+        .width(this.editorFieldWidth())
+        .align(Alignment.TopStart)
+        .alignSelf(ItemAlign.Center)
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .onAreaChange((oldArea: Area, newArea: Area) =>
+          this.handleBookmarkEditorAreaChange(oldArea, newArea));
+
+      Blank()
+        .width('100%')
+        .height(this.safeBottomInset());
+    }
+      .id('library-bookmark-editor')
+      .width('100%')
+      .height('100%');
+  }
+
+  @Builder
   private sheetContent() {
     Blank()
       .width('100%')
@@ -1649,7 +2521,16 @@ export struct LibrarySheet {
 
   @Builder
   private sheetInteractionLayer() {
-    if (librarySheetPullDismissEnabled()) {
+    if (this.bookmarkEditVisible) {
+      Column() {
+        this.bookmarkEditorContent();
+      }
+        .width('100%')
+        .height('100%')
+        .hitTestBehavior(this.bookmarkEditVisible ? HitTestMode.Default : HitTestMode.None)
+        .transition(TransitionEffect.translate({ x: 0, y: 8 }).animation({ duration: LIBRARY_EDITOR_TRANSITION_DURATION_MS, curve: Curve.EaseInOut }),
+          (transitionIn: boolean) => this.finishBookmarkEditorTransition(transitionIn));
+    } else if (librarySheetPullDismissEnabled()) {
       Column() {
         this.sheetContent();
       }
@@ -1661,13 +2542,23 @@ export struct LibrarySheet {
             .onActionUpdate((event: GestureEvent | undefined) => this.updateSheetSwipe(event))
             .onActionEnd((event: GestureEvent | undefined) => this.finishSheetSwipe(event))
             .onActionCancel(() => this.cancelSheetSwipe())
-        );
+        )
+        .hitTestBehavior(this.bookmarkEditVisible ? HitTestMode.None : HitTestMode.Default)
+        .transition(TransitionEffect.translate({ x: 0, y: 8 }).animation({
+          duration: LIBRARY_EDITOR_TRANSITION_DURATION_MS,
+          curve: Curve.EaseInOut
+        }));
     } else {
       Column() {
         this.sheetContent();
       }
         .width('100%')
-        .height('100%');
+        .height('100%')
+        .hitTestBehavior(this.bookmarkEditVisible ? HitTestMode.None : HitTestMode.Default)
+        .transition(TransitionEffect.translate({ x: 0, y: 8 }).animation({
+          duration: LIBRARY_EDITOR_TRANSITION_DURATION_MS,
+          curve: Curve.EaseInOut
+        }));
     }
   }
 
@@ -1701,33 +2592,31 @@ export struct LibrarySheet {
         .clip(true)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .translate({ x: this.sheetHorizontalOffset(), y: this.sheetSwipeOffset })
-        .opacity(1 - 0.22 * libraryDismissProgress(this.sheetSwipeOffset));
       }
         .width('100%')
         .height('100%')
         .backgroundColor(Color.Transparent);
 
-      // Keep the edit/check control outside the sheet hierarchy. This gives
-      // the library page the same independent floating action treatment as
-      // the tab overview's plus and done controls.
-      Stack({ alignContent: this.floatingEditAlignment() }) {
-        this.floatingEditButton();
+      // History keeps its existing floating edit control. Bookmarks use a
+      // long-press menu and must not expose the history editing affordance.
+      if (this.section === LibrarySection.HISTORY && !this.bookmarkEditVisible) {
+        Stack({ alignContent: this.floatingEditAlignment() }) {
+          this.floatingEditButton();
+        }
+          .id('library-floating-edit-host')
+          .width(this.sheetWidth())
+          .height('100%')
+          .alignSelf(ItemAlign.Center)
+          .translate({ x: this.sheetHorizontalOffset(), y: 0, z: 0 })
+          .padding({
+            left: this.chromeAnchor === BrowserChromeAnchor.START
+              ? this.floatingEditHorizontalInset() : 0,
+            right: this.chromeAnchor === BrowserChromeAnchor.START
+              ? 0 : this.floatingEditHorizontalInset(),
+            bottom: this.safeBottomInset() + this.floatingEditCornerInset()
+          })
+          .hitTestBehavior(HitTestMode.Transparent);
       }
-        .id('library-floating-edit-host')
-        .width(this.sheetWidth())
-        .height('100%')
-        .alignSelf(ItemAlign.Center)
-        .translate({ x: this.sheetHorizontalOffset(), y: 0, z: 0 })
-        .padding({
-          left: this.chromeAnchor === BrowserChromeAnchor.START
-            ? this.floatingEditHorizontalInset() : 0,
-          right: this.chromeAnchor === BrowserChromeAnchor.START
-            ? 0 : this.floatingEditHorizontalInset(),
-          bottom: this.safeBottomInset() + this.floatingEditCornerInset()
-        })
-        // The host only positions the floating pencil. It must not become a
-        // full-screen hit target and steal taps from the library tabs/list.
-        .hitTestBehavior(HitTestMode.Transparent);
     }
       .width('100%')
       .height('100%');

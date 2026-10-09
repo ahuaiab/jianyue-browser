@@ -64,13 +64,13 @@ export default function tabOverviewTransitionTest() {
 
     it('lands the live page on the active two-column card slot', 0, () => {
       const frame: TabOverviewPageFrame = tabOverviewPageFrame(1, 400, 800, 0, 0);
-      expect(frame.scaleX.toFixed(6)).assertEqual('0.402500');
-      expect(frame.scaleY.toFixed(6)).assertEqual('0.402500');
-      expect(frame.translateX.toFixed(6)).assertEqual('-86.500000');
-      expect(frame.translateY.toFixed(6)).assertEqual('-215.000000');
-      expect(frame.clipLeft.toFixed(6)).assertEqual('33.000000');
+      expect(frame.scaleX.toFixed(6)).assertEqual('0.445000');
+      expect(frame.scaleY.toFixed(6)).assertEqual('0.445000');
+      expect(frame.translateX.toFixed(6)).assertEqual('-95.000000');
+      expect(frame.translateY.toFixed(6)).assertEqual('-198.000000');
+      expect(frame.clipLeft.toFixed(6)).assertEqual('16.000000');
       expect(frame.clipTop.toFixed(6)).assertEqual('24.000000');
-      expect(frame.clipWidth.toFixed(6)).assertEqual('161.000000');
+      expect(frame.clipWidth.toFixed(6)).assertEqual('178.000000');
       expect(frame.clipHeight.toFixed(6)).assertEqual('242.000000');
       expect(frame.cornerRadius).assertEqual(16);
       expect(frame.borderWidth).assertEqual(2);
@@ -166,8 +166,8 @@ export default function tabOverviewTransitionTest() {
       expect(clip.left.toFixed(6)).assertEqual('0.000000');
       expect(clip.top.toFixed(6)).assertEqual('0.000000');
       expect(clip.width.toFixed(6)).assertEqual('400.000000');
-      expect(clip.height.toFixed(6)).assertEqual('601.242236');
-      expect(clip.cornerRadius.toFixed(6)).assertEqual('39.751553');
+      expect(clip.height.toFixed(6)).assertEqual('543.820225');
+      expect(clip.cornerRadius.toFixed(6)).assertEqual('35.955056');
     });
 
     it('keeps every static tab thumbnail flush with the card top', 0, () => {

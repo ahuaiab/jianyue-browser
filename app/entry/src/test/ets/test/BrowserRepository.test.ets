@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   BookmarkRecord,
+  BookmarkFolderRecord,
   BrowserSessionSnapshot,
   HistoryRecord,
   TabResidency
@@ -262,6 +263,135 @@ export default function browserRepositoryTest() {
       bookmarks = await repository.listBookmarks();
       expect(bookmarks.length).assertEqual(1);
       expect(bookmarks[0].url).assertEqual('https://b.example');
+    });
+
+    it('updates a saved bookmark in place and persists its title URL and original creation time', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      await repository.addBookmark({ url: 'https://first.example', title: 'First', createdAt: 1 });
+      await repository.addBookmark({ url: 'https://edit.example', title: 'Old', createdAt: 2 });
+      await repository.addBookmark({ url: 'https://last.example', title: 'Last', createdAt: 3 });
+
+      expect(await repository.updateBookmark('https://edit.example', '  New name  ', ' https://new.example/page ')).assertTrue();
+      const saved: BookmarkRecord[] = await new BrowserRepository(store).listBookmarks();
+      expect(saved.length).assertEqual(3);
+      expect(saved[0].url).assertEqual('https://first.example');
+      expect(saved[1].url).assertEqual('https://new.example/page');
+      expect(saved[1].title).assertEqual('New name');
+      expect(saved[1].createdAt).assertEqual(2);
+      expect(saved[2].url).assertEqual('https://last.example');
+      expect(await repository.updateBookmark('https://new.example/page', ' ', 'https://new.example/page')).assertTrue();
+      expect((await repository.listBookmarks())[1].title).assertEqual('https://new.example/page');
+    });
+
+    it('rejects invalid edits without losing existing bookmarks', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      await repository.addBookmark({ url: 'https://edit.example', title: 'Edit', createdAt: 1 });
+      await repository.addBookmark({ url: 'https://keep.example', title: 'Keep', createdAt: 2 });
+      const before: string = store.allValues().join('');
+      expect(await repository.updateBookmark('https://edit.example', 'Bad', 'https://keep.example')).assertFalse();
+      expect(await repository.updateBookmark('https://edit.example', 'Bad', '')).assertFalse();
+      expect(await repository.updateBookmark('https://edit.example', 'Bad', 'about:blank')).assertFalse();
+      expect(await repository.updateBookmark('https://edit.example', 'Bad', 'javascript:alert(1)')).assertFalse();
+      expect(await repository.updateBookmark('https://missing.example', 'Bad', 'https://new.example')).assertFalse();
+      expect(store.allValues().join('')).assertEqual(before);
+      expect((await repository.listBookmarks()).length).assertEqual(2);
+    });
+
+    it('keeps legacy bookmarks in the default folder and preserves an assigned folder', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore(new Map([
+        ['bookmarks.v1', JSON.stringify([
+          { url: 'https://legacy.example', title: 'Legacy', createdAt: 1 }
+        ])]
+      ]));
+      const repository: BrowserRepository = new BrowserRepository(store);
+      const folder: BookmarkFolderRecord | undefined = await repository.createBookmarkFolder('Reading');
+      expect(folder === undefined).assertFalse();
+      await repository.addBookmark({
+        url: 'https://folder.example',
+        title: 'Folder item',
+        createdAt: 2,
+        folderId: folder?.id
+      });
+
+      const saved: BookmarkRecord[] = await new BrowserRepository(store).listBookmarks();
+      expect(saved.length).assertEqual(2);
+      expect(saved[0].folderId).assertUndefined();
+      expect(saved[1].folderId).assertEqual(folder?.id);
+    });
+
+    it('trims and persists folder names while rejecting invalid and duplicate names under concurrent creation', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      const results: Array<BookmarkFolderRecord | undefined> = await Promise.all([
+        repository.createBookmarkFolder('  Reading  '),
+        repository.createBookmarkFolder('Reading'),
+        repository.createBookmarkFolder('Archive')
+      ]);
+      expect(results[0] === undefined).assertFalse();
+      expect(results[1]).assertUndefined();
+      expect(results[2] === undefined).assertFalse();
+      expect(await repository.createBookmarkFolder('   ')).assertUndefined();
+      expect(await repository.createBookmarkFolder('书签')).assertUndefined();
+      expect(await repository.createBookmarkFolder('x'.repeat(61))).assertUndefined();
+
+      const folders: BookmarkFolderRecord[] = await repository.listBookmarkFolders();
+      expect(folders.length).assertEqual(2);
+      expect(folders[0].name).assertEqual('Reading');
+      expect(folders[1].name).assertEqual('Archive');
+      expect(folders[0].id.length > 0).assertTrue();
+      expect(folders[0].id === folders[1].id).assertFalse();
+      const restored: BookmarkFolderRecord[] = await new BrowserRepository(store).listBookmarkFolders();
+      expect(restored.length).assertEqual(2);
+      expect(restored[0].id).assertEqual(folders[0].id);
+      expect(restored[1].name).assertEqual('Archive');
+    });
+
+    it('preserves bookmark folders on edits, moves explicitly, and rejects unknown folders without writes', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore();
+      const repository: BrowserRepository = new BrowserRepository(store);
+      const reading: BookmarkFolderRecord | undefined = await repository.createBookmarkFolder('Reading');
+      const archive: BookmarkFolderRecord | undefined = await repository.createBookmarkFolder('Archive');
+      expect(reading === undefined).assertFalse();
+      expect(archive === undefined).assertFalse();
+      await repository.addBookmark({
+        url: 'https://edit.example', title: 'Old', createdAt: 7, folderId: reading?.id
+      });
+
+      expect(await repository.updateBookmark('https://edit.example', ' Renamed ', 'https://renamed.example')).assertTrue();
+      let saved: BookmarkRecord[] = await repository.listBookmarks();
+      expect(saved[0].folderId).assertEqual(reading?.id);
+      expect(saved[0].title).assertEqual('Renamed');
+      expect(saved[0].createdAt).assertEqual(7);
+
+      expect(await repository.updateBookmark('https://renamed.example', 'Moved', 'https://moved.example', archive?.id)).assertTrue();
+      saved = await new BrowserRepository(store).listBookmarks();
+      expect(saved[0].folderId).assertEqual(archive?.id);
+      expect(saved[0].url).assertEqual('https://moved.example');
+      expect(await repository.updateBookmark('https://moved.example', 'Root', 'https://root.example', '')).assertTrue();
+      saved = await repository.listBookmarks();
+      expect(saved[0].folderId).assertUndefined();
+
+      const before: string = store.allValues().join('');
+      expect(await repository.updateBookmark('https://root.example', 'Invalid', 'https://bad-folder.example', 'missing-folder')).assertFalse();
+      expect(store.allValues().join('')).assertEqual(before);
+    });
+
+    it('skips malformed bookmark folder rows without failing the folder list', 0, async () => {
+      const store: FakeKeyValueStore = new FakeKeyValueStore(new Map([
+        ['bookmark-folders.v1', JSON.stringify([
+          { id: 'valid', name: 'Reading', createdAt: 1 },
+          null,
+          { id: '', name: 'No ID', createdAt: 2 },
+          { id: 'duplicate', name: '  Reading  ', createdAt: 3 },
+          { id: 'root', name: '书签', createdAt: 4 }
+        ])]
+      ]));
+      const folders: BookmarkFolderRecord[] = await new BrowserRepository(store).listBookmarkFolders();
+      expect(folders.length).assertEqual(1);
+      expect(folders[0].id).assertEqual('valid');
+      expect(folders[0].name).assertEqual('Reading');
     });
 
     it('discards malformed rows instead of failing the collection', 0, async () => {

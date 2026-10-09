@@ -11,7 +11,6 @@ import {
   TAB_SEARCH_PULL_THRESHOLD,
   TAB_SEARCH_REVEAL_ANIMATION_DURATION_MS,
   tabOverviewBorderOwner,
-  tabOverviewGridOpacityForTransition,
   tabOverviewActiveCardScrollOffset,
   tabOverviewGridLeft,
   tabOverviewGridWidth,
@@ -231,24 +230,6 @@ export struct TabOverview {
 
   private searchProgress(): number {
     return tabSearchVisualProgress(this.searchPullOffset);
-  }
-
-  private panelOpacity(): number {
-    // During a horizontal card close the thumbnail becomes the visual owner
-    // of the active card. Keep the grid opaque for that interval; otherwise
-    // the normal live-page handoff fades the card out while its snapshot is
-    // still travelling with the shell.
-    if (this.activeCloseThumbnailVisible()) {
-      return 1;
-    }
-    if (this.livePageTransform) {
-      return tabOverviewGridOpacityForTransition(
-        this.overviewProgress,
-        true,
-        this.overviewClosing
-      );
-    }
-    return this.interactiveReveal ? this.overviewProgress : 1;
   }
 
   private panelScale(): number {
@@ -576,7 +557,6 @@ export struct TabOverview {
         .width('100%')
         .height('100%')
         .backgroundColor(this.livePageTransform ? Color.Transparent : TAB_OVERVIEW_BACKGROUND_COLOR)
-        .opacity(this.panelOpacity())
         .scale({
           x: this.panelScale(),
           y: this.panelScale(),

@@ -57,7 +57,7 @@ export default function browserPullRefreshTest() {
       expect(browserPullRefreshIndicatorMode(67, 72, false))
         .assertEqual(BrowserPullRefreshIndicatorMode.READY);
       expect(browserPullRefreshIndicatorMode(0, 72, true))
-        .assertEqual(BrowserPullRefreshIndicatorMode.REFRESHING);
+        .assertEqual(BrowserPullRefreshIndicatorMode.HIDDEN);
     });
 
     it('lets the Web page keep scrolling unless refresh is enabled at its top', 0, () => {

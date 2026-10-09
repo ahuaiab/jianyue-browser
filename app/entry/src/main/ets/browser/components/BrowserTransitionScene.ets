@@ -9,6 +9,7 @@ import { PageFontSize } from '../model/PageDisplayState';
 import { BrowserErrorState } from '../model/BrowserTypes';
 import { StartPageItem } from '../model/StartPageModels';
 import { PageIconRecord } from '../model/PageIconModels';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import {
   browserPullRefreshContentTranslation,
   browserPullRefreshIndicatorMode,
@@ -38,11 +39,7 @@ import {
   tabOverviewTransitionViewportClipsOverflow
 } from '../model/TabOverviewActions';
 import { WebNodeHostController } from '../web/WebTabNode';
-import {
-  BROWSER_UI_ICON_CONTAINER_SIZE_VP,
-  BROWSER_UI_ICON_SIZE_VP,
-  BROWSER_UI_TEXT_SIZE_VP
-} from '../model/BrowserVisualMetrics';
+import { BROWSER_UI_TEXT_SIZE_VP } from '../model/BrowserVisualMetrics';
 
 /**
  * Native ArkUI page scene for Safari-style tab transitions.
@@ -101,6 +98,7 @@ export struct BrowserTransitionScene {
   @Param onPullRefresh: () => void = () => undefined;
   @Local pullDownOffset: number = 0;
   private pullGestureEligible: boolean = false;
+  private pullRefreshHapticTriggered: boolean = false;
   @Param currentItems: StartPageItem[] = [];
   @Param pageIcons: PageIconRecord[] = [];
   @Param pageIconRevision: number = 0;
@@ -230,7 +228,8 @@ export struct BrowserTransitionScene {
   }
 
   private beginPullRefreshGesture(): void {
-    this.pullGestureEligible = shouldCaptureBrowserPullGesture(
+    this.pullRefreshHapticTriggered = false;
+    this.pullGestureEligible = !this.isPullRefreshing && shouldCaptureBrowserPullGesture(
       this.canPullToRefresh,
       this.isPageAtTop(),
       this.interactionLocked,
@@ -245,12 +244,17 @@ export struct BrowserTransitionScene {
     if (!this.pullGestureEligible) {
       return;
     }
-    if (!this.canPullToRefresh || this.interactionLocked || !this.isPageAtTop()) {
+    if (!this.canPullToRefresh || this.interactionLocked || !this.isPageAtTop() || this.isPullRefreshing) {
       this.pullGestureEligible = false;
       this.settlePullDownOffset();
       return;
     }
     this.pullDownOffset = browserPullRefreshOffset(event.offsetY, this.pullRefreshLimit());
+    if (!this.pullRefreshHapticTriggered && shouldRefreshBrowserPageOnPullRelease(
+      this.pullDownOffset, this.pullRefreshLimit(), true)) {
+      this.pullRefreshHapticTriggered = true;
+      browserHaptics.light('pull-refresh');
+    }
   }
 
   private finishPullRefreshGesture(event: GestureEvent): void {
@@ -259,12 +263,10 @@ export struct BrowserTransitionScene {
       !this.interactionLocked && this.isPageAtTop() &&
       shouldRefreshBrowserPageOnPullRelease(this.pullDownOffset, this.pullRefreshLimit(), true);
     this.pullGestureEligible = false;
-    if (shouldRefresh) {
-      this.pullDownOffset = this.pullRefreshLimit();
-      this.onPullRefresh();
-      return;
-    }
     this.settlePullDownOffset();
+    if (shouldRefresh) {
+      this.onPullRefresh();
+    }
   }
 
   private cancelPullRefreshGesture(): void {
@@ -386,21 +388,14 @@ export struct BrowserTransitionScene {
       }
       if (this.pullRefreshIndicatorMode() !== BrowserPullRefreshIndicatorMode.HIDDEN) {
         Stack() {
-          if (this.pullRefreshIndicatorMode() === BrowserPullRefreshIndicatorMode.REFRESHING) {
-            LoadingProgress()
-              .width(28)
-              .height(28)
-              .color('#0A59F7');
-          } else {
-            Progress({
-              value: browserPullRefreshProgressPercent(this.pullDownOffset, this.pullRefreshLimit()),
-              total: 100,
-              type: ProgressType.Ring
-            })
-              .width(28)
-              .height(28)
-              .color('#0A59F7');
-          }
+          Progress({
+            value: browserPullRefreshProgressPercent(this.pullDownOffset, this.pullRefreshLimit()),
+            total: 100,
+            type: ProgressType.Ring
+          })
+            .width(28)
+            .height(28)
+            .color('#0A59F7');
         }
           .width(this.sceneWidth())
           .height(this.pullDownOffset)
@@ -514,19 +509,8 @@ export struct BrowserTransitionScene {
         .fontColor('#1D1D1F')
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.Center)
         .layoutWeight(1);
-      Button({ type: ButtonType.Normal, stateEffect: false }) {
-        SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(this.overviewCaptionMetric(BROWSER_UI_ICON_SIZE_VP))
-          .width(this.overviewCaptionMetric(BROWSER_UI_ICON_CONTAINER_SIZE_VP))
-          .height(this.overviewCaptionMetric(BROWSER_UI_ICON_CONTAINER_SIZE_VP))
-          .fontColor(['#69727C']);
-      }
-        .width(this.overviewCaptionMetric(28))
-        .height(this.overviewCaptionMetric(28))
-        .padding(0)
-        .backgroundColor(Color.Transparent)
-        .stateEffect(false);
     }
       .id('browser-live-page-caption')
       .width('100%')
@@ -537,7 +521,7 @@ export struct BrowserTransitionScene {
       })
       .padding({
         left: this.overviewCaptionMetric(12),
-        right: this.overviewCaptionMetric(2)
+        right: this.overviewCaptionMetric(12)
       })
       .backgroundColor('#FFFFFF')
       .borderRadius({
@@ -647,7 +631,7 @@ export struct BrowserTransitionScene {
       // ancestor is translated. In that case TabCard renders the same cached
       // page frame and owns the close animation; hide this live layer to avoid
       // the old page leaking through the moving card shell.
-      .opacity(this.overviewCloseUsesThumbnail ? 0 : this.livePageCloseFrame().opacity)
+      .opacity(this.overviewCloseUsesThumbnail ? 0 : 1)
       .scale({
         x: this.livePageCloseFrame().scale,
         y: this.livePageCloseFrame().scale,

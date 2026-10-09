@@ -44,6 +44,7 @@ import {
   HistoryRecord,
   normalizeAddressInput,
   searchEngineLabel,
+  searchQueryForUrl,
   searchUrlForEngine,
   TabResidency
 } from '../../../main/ets/browser/model/BrowserTypes';
@@ -286,6 +287,7 @@ interface SettingsFixture {
   contentBlockingEnabled?: boolean;
   showFavorites?: boolean;
   showFrequentSites?: boolean;
+  quickWebsiteSearchEnabled?: boolean;
   startPageSectionsConfigured?: boolean;
   startPageBackgroundId?: string;
   startPageBackgroundPosition?: StartPageBackgroundPosition;
@@ -376,11 +378,46 @@ export default function videoParityModelsTest() {
         .assertEqual('https://developer.huawei.com');
     });
 
-    it('keeps only Bing and Baidu built-ins and supports a custom search engine', 0, () => {
+    it('maps all built-in providers and restores search-origin queries', 0, () => {
+      const query: string = '红楼梦';
+      const engines: BrowserSearchEngine[] = availableBrowserSearchEngines();
+      const expected: string[] = [
+        'https://www.baidu.com/s?wd=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://www.sogou.com/web?query=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://www.so.com/s?q=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://cn.bing.com/search?q=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://www.google.com/search?q=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://search.yahoo.com/search?p=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://duckduckgo.com/?q=%E7%BA%A2%E6%A5%BC%E6%A2%A6',
+        'https://www.ecosia.org/search?q=%E7%BA%A2%E6%A5%BC%E6%A2%A6'
+      ];
+      for (let index: number = 0; index < engines.length; index += 1) {
+        const url: string = searchUrlForEngine(engines[index], query);
+        expect(url).assertEqual(expected[index]);
+        expect(searchQueryForUrl(url)).assertEqual(query);
+      }
+    });
+
+    it('defaults quick website search on and copies an explicit opt-out', 0, () => {
+      expect(DEFAULT_BROWSER_SETTINGS.quickWebsiteSearchEnabled).assertTrue();
+      const disabledFixture: SettingsFixture = { quickWebsiteSearchEnabled: false };
+      const disabled: BrowserSettings = normalizeBrowserSettings(disabledFixture as Object);
+      expect(disabled.quickWebsiteSearchEnabled).assertFalse();
+      expect(copyBrowserSettings(disabled).quickWebsiteSearchEnabled).assertFalse();
+      const defaultFixture: SettingsFixture = {};
+      expect(normalizeBrowserSettings(defaultFixture as Object).quickWebsiteSearchEnabled).assertTrue();
+    });
+    it('offers the eight video search providers and supports a custom search engine', 0, () => {
       const builtIns: BrowserSearchEngine[] = availableBrowserSearchEngines();
-      expect(builtIns.length).assertEqual(2);
-      expect(builtIns[0]).assertEqual(BrowserSearchEngine.BING);
-      expect(builtIns[1]).assertEqual(BrowserSearchEngine.BAIDU);
+      expect(builtIns.length).assertEqual(8);
+      expect(builtIns[0]).assertEqual(BrowserSearchEngine.BAIDU);
+      expect(builtIns[1]).assertEqual(BrowserSearchEngine.SOGOU);
+      expect(builtIns[2]).assertEqual(BrowserSearchEngine.SO360);
+      expect(builtIns[3]).assertEqual(BrowserSearchEngine.BING);
+      expect(builtIns[4]).assertEqual(BrowserSearchEngine.GOOGLE);
+      expect(builtIns[5]).assertEqual(BrowserSearchEngine.YAHOO);
+      expect(builtIns[6]).assertEqual(BrowserSearchEngine.DUCKDUCKGO);
+      expect(builtIns[7]).assertEqual(BrowserSearchEngine.ECOSIA);
 
       const customInput: CustomSearchEngine = {
         name: '自定义搜索',
@@ -390,8 +427,8 @@ export default function videoParityModelsTest() {
       expect(custom === undefined).assertFalse();
       if (custom !== undefined) {
         const engines: BrowserSearchEngine[] = availableBrowserSearchEngines(custom);
-        expect(engines.length).assertEqual(3);
-        expect(engines[2]).assertEqual(BrowserSearchEngine.CUSTOM);
+        expect(engines.length).assertEqual(9);
+        expect(engines[8]).assertEqual(BrowserSearchEngine.CUSTOM);
         expect(searchEngineLabel(BrowserSearchEngine.CUSTOM, custom)).assertEqual('自定义搜索');
         expect(searchUrlForEngine(BrowserSearchEngine.CUSTOM, '鸿蒙 浏览器', custom))
           .assertEqual('https://search.example/?q=%E9%B8%BF%E8%92%99%20%E6%B5%8F%E8%A7%88%E5%99%A8');
@@ -406,9 +443,9 @@ export default function videoParityModelsTest() {
 
       const migratedInput: SettingsFixture = { searchEngine: 'google' };
       const migrated: BrowserSettings = normalizeBrowserSettings(migratedInput as Object);
-      expect(migrated.searchEngine).assertEqual(BrowserSearchEngine.BING);
+      expect(migrated.searchEngine).assertEqual(BrowserSearchEngine.GOOGLE);
       expect(searchUrlForEngine('google' as BrowserSearchEngine, 'legacy'))
-        .assertEqual('https://cn.bing.com/search?q=legacy');
+        .assertEqual('https://www.google.com/search?q=legacy');
       const invalidCustomInput: CustomSearchEngine = {
         name: '无效',
         urlTemplate: 'https://example.com/search'
@@ -1229,7 +1266,7 @@ export default function videoParityModelsTest() {
       expect(tabOverviewTopPaddingForProgress(32, 0)).assertEqual(40);
       expect(tabOverviewTopPaddingForProgress(32, 0.5)).assertEqual(23);
       expect(tabOverviewTopPaddingForProgress(32, 1)).assertEqual(6);
-      expect(tabOverviewCardWidth(400)).assertEqual(161);
+      expect(tabOverviewCardWidth(400)).assertEqual(178);
     });
 
     it('keeps thumbnail previews proportional while anchoring the page crop to the top', 0, () => {

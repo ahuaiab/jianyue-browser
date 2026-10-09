@@ -1,10 +1,12 @@
 import {
   BookmarkRecord,
+  BookmarkFolderRecord,
   BrowserSessionSnapshot,
   BrowserTabRecord,
   displayUrlFor,
   HistoryRecord,
   lastValidUrlForTab,
+  loadableUrlFor,
   TabResidency
 } from '../model/BrowserTypes';
 import {
@@ -22,25 +24,32 @@ import {
 } from '../model/PageIconModels';
 import { ClosedTabRecord } from './ClosedTabStack';
 import { KeyValueStore } from './KeyValueStore';
+import { normalizeSiteSearchTemplates, SiteSearchTemplate, upsertSiteSearchTemplate } from '../model/SiteSearchModels';
 
 const ACTIVE_SLOT_KEY: string = 'session.active';
 const SLOT_A_KEY: string = 'session.a';
 const SLOT_B_KEY: string = 'session.b';
 const HISTORY_KEY: string = 'history.v1';
 const BOOKMARKS_KEY: string = 'bookmarks.v1';
+const BOOKMARK_FOLDERS_KEY: string = 'bookmark-folders.v1';
 const SETTINGS_KEY: string = 'browser.settings.v1';
 const START_PAGE_KEY: string = 'start.page.items.v1';
 const PAGE_ICONS_KEY: string = 'page.icons.v1';
 const CLOSED_TABS_KEY: string = 'closed.tabs.v1';
+const SITE_SEARCH_TEMPLATES_KEY: string = 'site.search.templates.v1';
 const MAX_HISTORY: number = 2000;
 const MAX_PAGE_ICONS: number = 256;
 const MAX_CLOSED_TABS: number = 20;
+const MAX_BOOKMARK_FOLDER_NAME_LENGTH: number = 60;
 
 export class BrowserRepository {
   private readonly store: KeyValueStore;
+  private siteSearchOperation: Promise<void> = Promise.resolve();
   private sessionOperation: Promise<void> = Promise.resolve();
   private historyOperation: Promise<void> = Promise.resolve();
   private pageIconOperation: Promise<void> = Promise.resolve();
+  private bookmarkFolderOperation: Promise<void> = Promise.resolve();
+  private nextBookmarkFolderId: number = 0;
 
   constructor(store: KeyValueStore) {
     this.store = store;
@@ -121,6 +130,13 @@ export class BrowserRepository {
   private enqueuePageIconOperation(operation: () => Promise<void>): Promise<void> {
     const next: Promise<void> = this.pageIconOperation.then(operation, operation);
     this.pageIconOperation = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  /** Serialize folder creation so concurrent requests cannot overwrite one another. */
+  private enqueueBookmarkFolderOperation(operation: () => Promise<void>): Promise<void> {
+    const next: Promise<void> = this.bookmarkFolderOperation.then(operation, operation);
+    this.bookmarkFolderOperation = next.then(() => undefined, () => undefined);
     return next;
   }
 
@@ -242,6 +258,93 @@ export class BrowserRepository {
     await this.writeJson(BOOKMARKS_KEY, bookmarks);
   }
 
+  async listBookmarkFolders(): Promise<BookmarkFolderRecord[]> {
+    const raw: string = await this.store.getString(BOOKMARK_FOLDERS_KEY, '[]');
+    try {
+      const parsed: BookmarkFolderRecord[] = JSON.parse(raw) as BookmarkFolderRecord[];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      const folders: BookmarkFolderRecord[] = [];
+      const ids: Set<string> = new Set<string>();
+      const names: Set<string> = new Set<string>();
+      for (let index: number = 0; index < parsed.length; index += 1) {
+        const folder: BookmarkFolderRecord = parsed[index];
+        if (!this.validBookmarkFolder(folder)) {
+          continue;
+        }
+        const name: string = folder.name.trim();
+        if (ids.has(folder.id) || names.has(name) || name === '书签') {
+          continue;
+        }
+        ids.add(folder.id);
+        names.add(name);
+        folders.push({ id: folder.id, name, createdAt: folder.createdAt });
+      }
+      return folders;
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async createBookmarkFolder(name: string): Promise<BookmarkFolderRecord | undefined> {
+    const normalizedName: string = name.trim();
+    if (normalizedName.length === 0 || normalizedName.length > MAX_BOOKMARK_FOLDER_NAME_LENGTH ||
+      normalizedName === '书签') {
+      return undefined;
+    }
+    let created: BookmarkFolderRecord | undefined;
+    await this.enqueueBookmarkFolderOperation(async (): Promise<void> => {
+      const folders: BookmarkFolderRecord[] = await this.listBookmarkFolders();
+      if (folders.some((folder: BookmarkFolderRecord) => folder.name === normalizedName)) {
+        return;
+      }
+      let id: string = '';
+      do {
+        this.nextBookmarkFolderId += 1;
+        id = `bookmark-folder-${Date.now()}-${this.nextBookmarkFolderId}`;
+      } while (folders.some((folder: BookmarkFolderRecord) => folder.id === id));
+      created = { id, name: normalizedName, createdAt: Date.now() };
+      folders.push(created);
+      await this.writeJson(BOOKMARK_FOLDERS_KEY, folders);
+    });
+    return created;
+  }
+
+  /** Replace the original bookmark once, retaining its order and creation time. */
+  async updateBookmark(originalUrl: string, title: string, url: string, folderId?: string): Promise<boolean> {
+    const normalizedUrl: string | undefined = loadableUrlFor(url);
+    if (normalizedUrl === undefined || normalizedUrl === 'about:blank') {
+      return false;
+    }
+    const bookmarks: BookmarkRecord[] = await this.listBookmarks();
+    const index: number = bookmarks.findIndex((record: BookmarkRecord) => record.url === originalUrl);
+    if (index < 0 || bookmarks.some((record: BookmarkRecord, position: number) =>
+      position !== index && record.url === normalizedUrl)) {
+      return false;
+    }
+    const existingFolderId: string | undefined = bookmarks[index].folderId;
+    const targetFolderId: string | undefined = folderId === undefined ? existingFolderId :
+      (folderId.length === 0 ? undefined : folderId);
+    if (targetFolderId !== undefined) {
+      const folders: BookmarkFolderRecord[] = await this.listBookmarkFolders();
+      if (!folders.some((folder: BookmarkFolderRecord) => folder.id === targetFolderId)) {
+        return false;
+      }
+    }
+    const updated: BookmarkRecord = {
+      url: normalizedUrl,
+      title: title.trim().length > 0 ? title.trim() : normalizedUrl,
+      createdAt: bookmarks[index].createdAt
+    };
+    if (targetFolderId !== undefined) {
+      updated.folderId = targetFolderId;
+    }
+    bookmarks[index] = updated;
+    await this.writeJson(BOOKMARKS_KEY, bookmarks);
+    return true;
+  }
+
   async removeBookmark(url: string): Promise<void> {
     if (url.length === 0) {
       return;
@@ -282,6 +385,25 @@ export class BrowserRepository {
 
   async saveSettings(settings: BrowserSettings): Promise<void> {
     await this.writeJson(SETTINGS_KEY, copyBrowserSettings(settings));
+  }
+
+  async loadSiteSearchTemplates(): Promise<SiteSearchTemplate[]> {
+    const raw: string = await this.store.getString(SITE_SEARCH_TEMPLATES_KEY, '[]');
+    try { return normalizeSiteSearchTemplates(JSON.parse(raw) as Object); } catch (_error) { return []; }
+  }
+
+  async saveSiteSearchTemplates(templates: SiteSearchTemplate[]): Promise<void> {
+    await this.writeJson(SITE_SEARCH_TEMPLATES_KEY, normalizeSiteSearchTemplates(templates as Object));
+  }
+
+  async upsertSiteSearchTemplate(template: SiteSearchTemplate): Promise<void> {
+    const operation = async (): Promise<void> => {
+      const current: SiteSearchTemplate[] = await this.loadSiteSearchTemplates();
+      await this.writeJson(SITE_SEARCH_TEMPLATES_KEY, upsertSiteSearchTemplate(current, template));
+    };
+    const next: Promise<void> = this.siteSearchOperation.then(operation, operation);
+    this.siteSearchOperation = next.then(() => undefined, () => undefined);
+    await next;
   }
 
   async listStartPageItems(): Promise<StartPageItem[]> {
@@ -428,7 +550,15 @@ export class BrowserRepository {
   private validBookmark(record: BookmarkRecord): boolean {
     return record !== undefined && typeof record.url === 'string' && record.url.length > 0 &&
       typeof record.title === 'string' && typeof record.createdAt === 'number' &&
-      Number.isFinite(record.createdAt);
+      Number.isFinite(record.createdAt) &&
+      (record.folderId === undefined || typeof record.folderId === 'string');
+  }
+
+  private validBookmarkFolder(folder: BookmarkFolderRecord): boolean {
+    return folder !== undefined && folder !== null && typeof folder.id === 'string' && folder.id.trim().length > 0 &&
+      typeof folder.name === 'string' && folder.name.trim().length > 0 &&
+      folder.name.trim().length <= MAX_BOOKMARK_FOLDER_NAME_LENGTH &&
+      typeof folder.createdAt === 'number' && Number.isFinite(folder.createdAt);
   }
 
   private copyTab(tab: BrowserTabRecord): BrowserTabRecord {
@@ -459,10 +589,14 @@ export class BrowserRepository {
   }
 
   private copyBookmark(record: BookmarkRecord): BookmarkRecord {
-    return {
+    const copy: BookmarkRecord = {
       url: record.url,
       title: record.title,
       createdAt: record.createdAt
     };
+    if (record.folderId !== undefined && record.folderId.length > 0) {
+      copy.folderId = record.folderId;
+    }
+    return copy;
   }
 }

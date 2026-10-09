@@ -1,5 +1,9 @@
 import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
+import {
+  DEFAULT_READER_MODE_SETTINGS, ReaderModeSettings, ReaderModeTextSize, ReaderModeTheme
+} from '../model/ReaderMode';
+import { SiteSearchSuggestion } from '../model/SiteSearchModels';
 import { BrowserTabRecord, PendingTabDraft } from '../model/BrowserTypes';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
 import { TabPreviewKind } from '../model/TabGestureMotion';
@@ -54,11 +58,21 @@ export struct BottomBrowserBar {
   @Param selectedFontSize: PageFontSize = PageFontSize.STANDARD;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
+  @Param readerAvailable: boolean = false;
+  @Param readerActive: boolean = false;
+  @Param readerSettings: ReaderModeSettings = DEFAULT_READER_MODE_SETTINGS;
+  @Param siteSearchSuggestion: SiteSearchSuggestion | undefined = undefined;
+  @Param onSiteSearch: (url: string) => void = (_url: string) => undefined;
+  @Param onReaderTextSize: (size: ReaderModeTextSize) => void = (_size: ReaderModeTextSize) => undefined;
+  @Param onReaderTheme: (theme: ReaderModeTheme) => void = (_theme: ReaderModeTheme) => undefined;
+  @Param onReaderAutoChange: (enabled: boolean) => void = (_enabled: boolean) => undefined;
   @Param previewKind: TabPreviewKind = TabPreviewKind.NONE;
   @Param newTabProgress: number = 0;
   @Param addressHandoffMounted: boolean = false;
   @Param addressHandoffProgress: number = 1;
   @Param downloadProgress: DownloadProgressSnapshot | undefined = undefined;
+  @Param pageLoadProgress: number = 0;
+  @Param pageLoadOpacity: number = 1;
   /** BrowserShell renders the shared address strip above this surface. */
   @Param renderAddress: boolean = true;
   @Param gestureState: string = 'idle';
@@ -116,7 +130,14 @@ export struct BottomBrowserBar {
           addressInputFocusEnabled: this.addressInputFocusEnabled,
           inputFocusRequestToken: this.inputFocusRequestToken, selectedFontSize: this.selectedFontSize,
           webReady: this.webReady, desktopMode: this.desktopMode,
+          readerAvailable: this.readerAvailable, readerActive: this.readerActive,
+          readerSettings: this.readerSettings,
+          siteSearchSuggestion: this.siteSearchSuggestion, onSiteSearch: this.onSiteSearch,
+          onReaderTextSize: this.onReaderTextSize, onReaderTheme: this.onReaderTheme,
+          onReaderAutoChange: this.onReaderAutoChange,
           downloadProgress: bottomBrowserBarDownloadSnapshot(this.downloadProgress),
+          pageLoadProgress: this.pageLoadProgress,
+          pageLoadOpacity: this.pageLoadOpacity,
           onNavigate: this.onNavigate, onReload: this.onReload, onOpenAddress: this.onOpenAddress,
           onAddressChange: this.onAddressChange, onInputFocusChange: this.onInputFocusChange,
           onAddressSubmit: this.onAddressSubmit,

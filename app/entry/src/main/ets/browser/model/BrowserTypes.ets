@@ -62,6 +62,14 @@ export interface BookmarkRecord {
   url: string;
   title: string;
   createdAt: number;
+  /** Missing or empty means the default root folder for legacy compatibility. */
+  folderId?: string;
+}
+
+export interface BookmarkFolderRecord {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 export enum BrowserErrorKind {
@@ -130,6 +138,24 @@ export function searchEngineLabel(engine: BrowserSearchEngine, custom?: CustomSe
   if (engine === BrowserSearchEngine.BAIDU) {
     return '百度';
   }
+  if (engine === BrowserSearchEngine.SOGOU) {
+    return '搜狗';
+  }
+  if (engine === BrowserSearchEngine.SO360) {
+    return '360搜索';
+  }
+  if (engine === BrowserSearchEngine.GOOGLE) {
+    return '谷歌';
+  }
+  if (engine === BrowserSearchEngine.YAHOO) {
+    return '雅虎';
+  }
+  if (engine === BrowserSearchEngine.DUCKDUCKGO) {
+    return 'DuckDuckGo';
+  }
+  if (engine === BrowserSearchEngine.ECOSIA) {
+    return 'Ecosia';
+  }
   if (engine === BrowserSearchEngine.CUSTOM && custom !== undefined) {
     return custom.name;
   }
@@ -144,6 +170,24 @@ export function searchUrlForEngine(
   const encoded: string = encodeURIComponent(query);
   if (engine === BrowserSearchEngine.BAIDU) {
     return `https://www.baidu.com/s?wd=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.SOGOU) {
+    return `https://www.sogou.com/web?query=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.SO360) {
+    return `https://www.so.com/s?q=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.GOOGLE) {
+    return `https://www.google.com/search?q=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.YAHOO) {
+    return `https://search.yahoo.com/search?p=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.DUCKDUCKGO) {
+    return `https://duckduckgo.com/?q=${encoded}`;
+  }
+  if (engine === BrowserSearchEngine.ECOSIA) {
+    return `https://www.ecosia.org/search?q=${encoded}`;
   }
   if (engine === BrowserSearchEngine.CUSTOM && custom !== undefined && custom.urlTemplate.includes('%s')) {
     return custom.urlTemplate.split('%s').join(encoded);
@@ -171,6 +215,24 @@ function searchResultDescriptorFor(url: string): SearchResultDescriptor | undefi
   }
   if ((host === 'www.baidu.com' || host === 'baidu.com') && path.startsWith('/s?')) {
     return { engine: BrowserSearchEngine.BAIDU, queryParameter: 'wd' };
+  }
+  if ((host === 'www.sogou.com' || host === 'sogou.com') && path.startsWith('/web?')) {
+    return { engine: BrowserSearchEngine.SOGOU, queryParameter: 'query' };
+  }
+  if ((host === 'www.so.com' || host === 'so.com') && path.startsWith('/s?')) {
+    return { engine: BrowserSearchEngine.SO360, queryParameter: 'q' };
+  }
+  if ((host === 'www.google.com' || host === 'google.com') && path.startsWith('/search?')) {
+    return { engine: BrowserSearchEngine.GOOGLE, queryParameter: 'q' };
+  }
+  if (host === 'search.yahoo.com' && path.startsWith('/search?')) {
+    return { engine: BrowserSearchEngine.YAHOO, queryParameter: 'p' };
+  }
+  if (host === 'duckduckgo.com' || host === 'www.duckduckgo.com') {
+    return { engine: BrowserSearchEngine.DUCKDUCKGO, queryParameter: 'q' };
+  }
+  if ((host === 'www.ecosia.org' || host === 'ecosia.org') && path.startsWith('/search?')) {
+    return { engine: BrowserSearchEngine.ECOSIA, queryParameter: 'q' };
   }
   return undefined;
 }

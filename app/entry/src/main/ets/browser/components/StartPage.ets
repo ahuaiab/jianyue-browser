@@ -1,4 +1,5 @@
 import { BrowserSettings } from '../model/BrowserSettings';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import { pageIconPathForUrl, PageIconRecord } from '../model/PageIconModels';
 import fileUri from '@ohos.file.fileuri';
 import {
@@ -162,7 +163,10 @@ export struct StartPage {
       .systemMaterial(this.shouldUseImmersiveSurface()
         ? safariImmersiveControlMaterialIfSupported()
         : undefined)
-      .onClick(() => this.onCustomize());
+      .onClick(() => {
+        browserHaptics.light('start-page-edit');
+        this.onCustomize();
+      });
   }
 
   @Builder

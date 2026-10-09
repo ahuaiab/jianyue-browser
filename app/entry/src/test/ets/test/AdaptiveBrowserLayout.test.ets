@@ -165,24 +165,62 @@ export default function adaptiveBrowserLayoutTest() {
       expect(libraryListWidth(libraryContentCardWidth(narrow.width))).assertEqual(228);
     });
 
-    it('keeps action targets and card widths stable across phone and wide windows', 0, () => {
+    it('keeps action targets fixed while adapting two card columns to the window', 0, () => {
       expect(safariBottomChromeActionSlotWidth(366)).assertEqual(62);
       expect(safariBottomChromeActionSlotWidth(900)).assertEqual(62);
       expect(tabOverviewCardWidth(366)).assertEqual(161);
-      expect(tabOverviewCardWidth(900)).assertEqual(161);
+      expect(tabOverviewCardWidth(900)).assertEqual(428);
       expect(tabOverviewCardWidth(320)).assertEqual(138);
     });
 
-    it('lands both live card columns inside the centered fixed grid on a wide window', 0, () => {
+    it('lands four live card slots in two equally sized columns on a wide window', 0, () => {
       const first: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 0, 0);
       const second: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 1, 0);
+      const third: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 2, 0);
+      const fourth: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 3, 0);
 
-      expect(first.clipLeft).assertEqual(283);
+      expect(tabOverviewGridWidth(900)).assertEqual(900);
+      expect(tabOverviewGridLeft(900)).assertEqual(0);
+      expect(first.clipLeft).assertEqual(16);
       expect(second.clipLeft).assertEqual(456);
-      expect(first.clipWidth).assertEqual(161);
-      expect(second.clipWidth).assertEqual(161);
+      expect(first.clipWidth).assertEqual(428);
+      expect(second.clipWidth).assertEqual(428);
       expect(first.clipHeight).assertEqual(242);
       expect(second.clipHeight).assertEqual(242);
+      expect(third.clipLeft).assertEqual(first.clipLeft);
+      expect(fourth.clipLeft).assertEqual(second.clipLeft);
+      expect(third.clipWidth).assertEqual(first.clipWidth);
+      expect(fourth.clipWidth).assertEqual(second.clipWidth);
+      expect(third.clipTop - first.clipTop).assertEqual(254);
+      expect(fourth.clipTop).assertEqual(third.clipTop);
+      expect(first.scaleX).assertEqual(first.scaleY);
+    });
+
+    it('fills the asymmetric wide safe region with two card columns', 0, () => {
+      const first: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 0, 0, 0, 0, 32, 12);
+      const second: TabOverviewPageFrame = tabOverviewPageFrame(1, 900, 700, 1, 0, 0, 0, 32, 12);
+
+      expect(tabOverviewGridWidth(900, 32, 12)).assertEqual(856);
+      expect(tabOverviewGridLeft(900, 32, 12)).assertEqual(32);
+      expect(tabOverviewCardWidth(900, 32, 12)).assertEqual(406);
+      expect(first.clipLeft).assertEqual(48);
+      expect(second.clipLeft).assertEqual(466);
+      expect(first.clipWidth).assertEqual(406);
+      expect(second.clipWidth).assertEqual(406);
+      expect(second.clipLeft + second.clipWidth).assertEqual(872);
+      expect(first.scaleX).assertEqual(first.scaleY);
+    });
+
+    it('keeps overview geometry finite when window metrics are invalid or crowded', 0, () => {
+      expect(tabOverviewGridWidth(900, Number.NaN, Number.POSITIVE_INFINITY)).assertEqual(900);
+      expect(tabOverviewGridLeft(900, Number.NaN, Number.POSITIVE_INFINITY)).assertEqual(0);
+      expect(tabOverviewGridWidth(900, -32, -12)).assertEqual(900);
+      expect(tabOverviewGridLeft(900, -32, -12)).assertEqual(0);
+      expect(tabOverviewGridWidth(300, 500, 500)).assertEqual(1);
+      expect(tabOverviewGridLeft(300, 500, 500)).assertEqual(299);
+      expect(tabOverviewCardWidth(300, 500, 500)).assertEqual(1);
+      expect(tabOverviewGridWidth(Number.NaN)).assertEqual(1);
+      expect(tabOverviewGridLeft(Number.POSITIVE_INFINITY)).assertEqual(0);
     });
 
     it('fits grid columns and live pages inside asymmetric narrow avoid areas', 0, () => {

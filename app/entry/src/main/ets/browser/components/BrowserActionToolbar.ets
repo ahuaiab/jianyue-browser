@@ -8,6 +8,7 @@ import {
   safariBottomChromeActionSlotWidth
 } from '../model/BrowserVisualMetrics';
 import { LIBRARY_BOOKMARK_BUTTON_MENU_LABEL } from '../model/LibraryModels';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 @ComponentV2
@@ -48,6 +49,7 @@ export struct BrowserActionToolbar {
     this.longPressedId = id;
     this.menuShownId = id;
     this.suppressNextClickId = id;
+    browserHaptics.light('toolbar-long-press');
   }
 
   private endLongPress(id: string): void {
@@ -81,33 +83,11 @@ export struct BrowserActionToolbar {
 
   @Builder
   private tabOverviewIcon() {
-    Stack() {
-      Polyline()
-        .width(24)
-        .height(24)
-        .points([[3, 3], [21, 3], [21, 8]])
-        .fillOpacity(0)
-        .stroke('#007AFF')
-        .strokeWidth(2)
-        .strokeLineJoin(LineJoinStyle.Round)
-        .offset({ x: -3, y: -3 });
-      Polyline()
-        .width(24)
-        .height(24)
-        .points([[3, 3], [3, 21], [8, 21]])
-        .fillOpacity(0)
-        .stroke('#007AFF')
-        .strokeWidth(2)
-        .strokeLineJoin(LineJoinStyle.Round)
-        .offset({ x: -3, y: -3 });
-      SymbolGlyph($r('sys.symbol.square'))
-        .fontSize(BROWSER_UI_ICON_SIZE_VP)
-        .fontColor(['#007AFF'])
-        .offset({ x: 3, y: 3 });
-    }
+    Image($r('app.media.tab_overview'))
       .id('tab-overview-icon-container')
       .width(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
-      .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP);
+      .height(BROWSER_UI_ICON_CONTAINER_SIZE_VP)
+      .draggable(false);
   }
 
   @Builder

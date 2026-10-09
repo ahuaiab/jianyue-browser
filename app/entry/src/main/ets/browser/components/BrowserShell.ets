@@ -56,6 +56,7 @@ import { DownloadProgressSnapshot, DownloadStatus, DownloadTaskRecord } from '..
 import { consumeFullScreenBackPress } from '../model/FullScreenBackAction';
 import { isBrowserWebPageAtTop } from '../model/BrowserPullRefresh';
 import { shouldShowPageLevelNetworkError } from '../model/BrowserLoadErrorPolicy';
+import { PageLoadProgressStore } from '../model/PageLoadProgress';
 import {
   desktopUserAgentFor,
   googleSearchCompatibleUserAgentFor,
@@ -202,8 +203,10 @@ import {
   shouldShowHorizontalTabHandoff
 } from '../model/SafariTabTransition';
 import { TouchOwner } from '../gesture/TouchOwnership';
+import { browserHaptics } from '../gesture/BrowserHaptics';
 import {
   AddressBarSource,
+  BookmarkFolderRecord,
   BookmarkRecord,
   bookmarkRecordForPage,
   BrowserErrorKind,
@@ -235,6 +238,19 @@ import { DownloadNotificationGateway } from '../web/DownloadNotificationGateway'
 import { DownloadService, WebCookiePort } from '../web/DownloadService';
 import { RequestAgentGateway } from '../web/RequestAgentGateway';
 import { takePendingExternalUrl } from '../model/BrowserLaunchState';
+import {
+  autoReaderEnabledFor, DEFAULT_READER_MODE_SETTINGS, normalizeReaderModeSettings,
+  ReaderModeResult, ReaderModeSettings, ReaderModeTextSize, ReaderModeTheme, setAutoReaderHost
+} from '../model/ReaderMode';
+import { ReaderModeController } from '../web/ReaderModeController';
+import { ReaderModeRepository } from '../data/ReaderModeRepository';
+import {
+  SiteSearchFormSnapshot, SiteSearchSuggestion, SiteSearchTemplate,
+  siteSearchSuggestionForInput, siteSearchTemplateFromForm,
+  siteSearchTemplateMatchesUrl, upsertSiteSearchTemplate
+} from '../model/SiteSearchModels';
+import { SITE_SEARCH_FORM_SCAN_SCRIPT } from '../web/SiteSearchDiscovery';
+import { readWebScriptJson } from '../web/WebScriptJson';
 import {
   bottomChromeHiddenForScroll,
   BrowserChromeScrollDirection,
@@ -546,6 +562,7 @@ class ArkWebTabRuntimePort implements TabRuntimePort {
 
 class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownloadObserver {
   private readonly pageBeginCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void;
+  private readonly progressCallback: (tabId: TabId, controller: webview.WebviewController, progress: number) => void;
   private readonly historyUrlChangedCallback: (tabId: TabId, controller: webview.WebviewController, url: string) => void;
   private readonly callback: (tabId: TabId, controller: webview.WebviewController) => void;
   private readonly scrollCallback: (
@@ -617,9 +634,12 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
     ) => undefined,
     historyUrlChangedCallback: (
       tabId: TabId, controller: webview.WebviewController, url: string
-    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _url: string) => undefined
+    ) => void = (_tabId: TabId, _controller: webview.WebviewController, _url: string) => undefined,
+    progressCallback: (tabId: TabId, controller: webview.WebviewController, progress: number) => void =
+      (_tabId: TabId, _controller: webview.WebviewController, _progress: number) => undefined
   ) {
     this.pageBeginCallback = pageBeginCallback;
+    this.progressCallback = progressCallback;
     this.historyUrlChangedCallback = historyUrlChangedCallback;
     this.callback = callback;
     this.scrollCallback = scrollCallback;
@@ -638,6 +658,10 @@ class BrowserPageLifecycleObserver implements WebPageLifecycleObserver, WebDownl
 
   onPageBegin(tabId: TabId, controller: webview.WebviewController, url: string): void {
     this.pageBeginCallback(tabId, controller, url);
+  }
+
+  onProgressChange(tabId: TabId, controller: webview.WebviewController, progress: number): void {
+    this.progressCallback(tabId, controller, progress);
   }
 
   onHistoryUrlChanged(tabId: TabId, controller: webview.WebviewController, url: string): void {
@@ -874,6 +898,7 @@ export struct BrowserShell {
   // later in aboutToAppear().
   @Local browserSettings: BrowserSettings = {
     searchEngine: BrowserSearchEngine.BING,
+    quickWebsiteSearchEnabled: true,
     autoCloseTabs: AutoCloseTabsPolicy.ON_BROWSER_CLOSE,
     contentBlockingEnabled: false,
     showFavorites: false,
@@ -888,10 +913,22 @@ export struct BrowserShell {
     startPageAppearance: StartPageAppearance.FOLLOW_SYSTEM,
     defaultFontSize: 'standard'
   };
+  @Local readerSettings: ReaderModeSettings = normalizeReaderModeSettings(DEFAULT_READER_MODE_SETTINGS);
+  @Local readerStateRevision: number = 0;
+  @Local siteSearchTemplates: SiteSearchTemplate[] = [];
+  private readerController: ReaderModeController | undefined;
+  private readerRepository: ReaderModeRepository | undefined;
+  private readerResultsByTab: Map<TabId, ReaderModeResult> = new Map();
+  private featureGenerationByTab: Map<TabId, number> = new Map();
+  private readerOperationByTab: Map<TabId, number> = new Map();
+  private readerRequestedUrlByTab: Map<TabId, string> = new Map();
+  private readerBusyTabs: Set<TabId> = new Set();
+  private siteSearchCandidatesByTab: Map<TabId, SiteSearchTemplate[]> = new Map();
   @Local startPageItems: StartPageItem[] = [];
   @Local historyItems: HistoryRecord[] = [];
   @Local historyRevision: number = 0;
   @Local bookmarkItems: BookmarkRecord[] = [];
+  @Local bookmarkFolderItems: BookmarkFolderRecord[] = [];
   @Local pageIconItems: PageIconRecord[] = [];
   @Local pageIconRevision: number = 0;
   private historySuppressedTabId: TabId = '';
@@ -903,6 +940,7 @@ export struct BrowserShell {
   private fullScreenExitTabId: TabId = '';
   private fullScreenExitAction: (() => void) | undefined = undefined;
   @Local pageReady: boolean = false;
+  @Local pageLoadProgressRevision: number = 0;
   @Local showLibrary: boolean = false;
   @Local showStartPageCustomize: boolean = false;
   @Local showStartPageBackgroundAdjust: boolean = false;
@@ -948,6 +986,9 @@ export struct BrowserShell {
   @Local viewportHeight: number = 800;
   private measuredHostViewportWidth: number = this.viewportFallbackWidth;
   private addressGestureFinished: boolean = false;
+  private overviewOpenHapticTriggered: boolean = false;
+  private addressGestureTabSwitchHapticTriggered: boolean = false;
+  private edgeNewTabHapticTriggered: boolean = false;
   // Keep close/reorder gesture geometry aligned with the rendered tab card.
   private readonly cardHeight: number = TAB_OVERVIEW_GESTURE_CARD_HEIGHT;
   private readonly cardEngines: Map<TabId, GestureDecisionEngine> = new Map();
@@ -1001,6 +1042,8 @@ export struct BrowserShell {
   private readonly pendingSearchNavigationByTab: Set<TabId> = new Set();
   private readonly searchResultSettledAtByTab: Map<TabId, number> = new Map();
   private readonly pageReadyByTab: Map<TabId, boolean> = new Map();
+  private readonly pageLoadProgress: PageLoadProgressStore = new PageLoadProgressStore();
+  private readonly pageLoadHideTimers: Map<TabId, number> = new Map();
   private readonly canNavigateBackByTab: Map<TabId, boolean> = new Map();
   private readonly canNavigateForwardByTab: Map<TabId, boolean> = new Map();
   private readonly errorStatesByTab: Map<TabId, BrowserErrorState | undefined> = new Map();
@@ -1076,6 +1119,7 @@ export struct BrowserShell {
       };
     const pageLifecycleObserver: WebPageLifecycleObserver = new BrowserPageLifecycleObserver(
       (tabId: TabId, controller: webview.WebviewController) => {
+        this.completePageLoad(tabId);
         this.resetBottomChromeScroll(tabId);
         this.applyUserAgentMode(tabId, controller, false);
         const currentUrl: string = this.urlForTab(tabId);
@@ -1127,6 +1171,7 @@ export struct BrowserShell {
           this.refreshNavigationState(controller);
           this.rememberTabViewState(tabId);
         }
+        void this.refreshPageFeatures(tabId, controller);
         this.scheduleSnapshot(tabId, controller);
         // ArkWeb can settle its back/forward list one frame after page-end.
         // Re-read it after that settle so the nested toolbar does not retain
@@ -1249,9 +1294,16 @@ export struct BrowserShell {
         const currentUrl: string = this.urlForTab(tabId);
         const validation = validateBrowserUrl(reportedUrl);
         const nextUrl: string = committedNavigationUrl(reportedUrl, currentUrl);
+        this.resetPageFeatures(tabId, nextUrl);
         const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
           (item: BrowserTabRecord) => item.id === tabId
         );
+        if (tab !== undefined) {
+          this.cancelPageLoadHide(tabId);
+          if (this.pageLoadProgress.begin(tabId, nextUrl)) {
+            this.pageLoadProgressRevision += 1;
+          }
+        }
         if (!validation.valid && reportedUrl.trim().length > 0) {
           this.logRejectedLifecycleUrl(tabId, reportedUrl, currentUrl, 'onPageBegin');
         }
@@ -1312,7 +1364,13 @@ export struct BrowserShell {
         if (nextUrl === currentUrl) {
           return;
         }
+        this.resetPageFeatures(tabId, nextUrl);
         this.updateAddressPresentationForNavigation(tabId, nextUrl, 'end');
+        setTimeout(() => {
+          if (this.urlForTab(tabId) === nextUrl) {
+            void this.refreshPageFeatures(tabId, controller);
+          }
+        }, 180);
         const nextTitle: string = this.titleForNavigation(tabId, nextUrl);
         if (this.tabStore.updateTabUrl(
           tabId,
@@ -1328,12 +1386,24 @@ export struct BrowserShell {
           }
           void this.saveSession();
         }
+      },
+      (tabId: TabId, controller: webview.WebviewController, progress: number) => {
+        if (this.runtimePort?.controllerFor(tabId) !== controller) {
+          return;
+        }
+        if (this.pageLoadProgress.update(tabId, progress)) {
+          this.pageLoadProgressRevision += 1;
+        }
+        this.schedulePageLoadHide(tabId);
       }
     );
     const keyValueStore: KeyValueStore = hostContext === undefined
       ? new MemoryKeyValueStore()
       : new PreferencesKeyValueStore(hostContext);
     this.repository = new BrowserRepository(keyValueStore);
+    this.readerRepository = new ReaderModeRepository(keyValueStore);
+    this.readerController = hostContext === undefined ? undefined
+      : new ReaderModeController(hostContext as common.UIAbilityContext);
     if (hostContext !== undefined) {
       const existingDownloadService: DownloadService | undefined = sharedDownloadService;
       const downloadService: DownloadService = existingDownloadService === undefined ||
@@ -1439,6 +1509,9 @@ export struct BrowserShell {
       this.lifecyclePort = undefined;
     }
     this.webTabPool?.releaseAll();
+    this.pageLoadHideTimers.forEach((timer: number) => clearTimeout(timer));
+    this.pageLoadHideTimers.clear();
+    this.pageLoadProgress.clear();
     this.cardHorizontalOffsets.clear();
   }
 
@@ -1816,6 +1889,58 @@ export struct BrowserShell {
     return this.pageReady || this.runtimePort?.controllerFor(tab.id) !== undefined;
   }
 
+  private pageLoadProgressForTab(tabId: TabId): number {
+    // Maps are not observed by ComponentV2; read the revision in the render path.
+    void this.pageLoadProgressRevision;
+    return this.pageLoadProgress.progressFor(tabId);
+  }
+
+  private pageLoadOpacityForTab(tabId: TabId): number {
+    void this.pageLoadProgressRevision;
+    return this.pageLoadProgress.opacityFor(tabId);
+  }
+
+  private cancelPageLoadHide(tabId: TabId): void {
+    const timer: number | undefined = this.pageLoadHideTimers.get(tabId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.pageLoadHideTimers.delete(tabId);
+    }
+  }
+
+  private schedulePageLoadHide(tabId: TabId): void {
+    const delay: number | undefined = this.pageLoadProgress.nextVisibilityDelay(tabId);
+    if (delay === undefined || this.pageLoadHideTimers.has(tabId)) {
+      return;
+    }
+    const timer: number = setTimeout(() => {
+      // A cancelled callback may already be queued; never apply it to a new load.
+      if (this.pageLoadHideTimers.get(tabId) !== timer) {
+        return;
+      }
+      this.pageLoadHideTimers.delete(tabId);
+      if (this.pageLoadProgress.advanceVisibility(tabId)) {
+        this.pageLoadProgressRevision += 1;
+      }
+      this.schedulePageLoadHide(tabId);
+    }, delay);
+    this.pageLoadHideTimers.set(tabId, timer);
+  }
+
+  private completePageLoad(tabId: TabId): void {
+    if (this.pageLoadProgress.complete(tabId)) {
+      this.pageLoadProgressRevision += 1;
+    }
+    this.schedulePageLoadHide(tabId);
+  }
+
+  private finishPageLoad(tabId: TabId): void {
+    this.cancelPageLoadHide(tabId);
+    if (this.pageLoadProgress.finish(tabId)) {
+      this.pageLoadProgressRevision += 1;
+    }
+  }
+
   private downloadProgressForTab(tabId: TabId): DownloadProgressSnapshot | undefined {
     return selectDownloadProgressForTab(this.downloadTasks, tabId);
   }
@@ -2131,6 +2256,7 @@ export struct BrowserShell {
   }
 
   private resetTabViewState(tabId: TabId): void {
+    this.finishPageLoad(tabId);
     this.pageDisplayStates.set(tabId, copyPageDisplayState(DEFAULT_PAGE_DISPLAY_STATE));
     this.pageReadyByTab.set(tabId, false);
     this.canNavigateBackByTab.set(tabId, false);
@@ -2140,6 +2266,10 @@ export struct BrowserShell {
   }
 
   private removeTabViewState(tabId: TabId): void {
+    this.finishPageLoad(tabId);
+    this.resetPageFeatures(tabId, '');
+    this.siteSearchCandidatesByTab.delete(tabId);
+    this.readerRequestedUrlByTab.delete(tabId);
     this.latestWebScrollOffsetByTab.delete(tabId);
     if (this.pullRefreshInProgressTabId === tabId) {
       this.pullRefreshInProgressTabId = '';
@@ -2737,6 +2867,7 @@ export struct BrowserShell {
     );
     try {
       this.applyUserAgentForNavigation(tabId, controller, url);
+      this.finishPageLoad(tabId);
       controller.loadUrl(url);
       return true;
     } catch (_error) {
@@ -2760,6 +2891,7 @@ export struct BrowserShell {
     code: number,
     sourceUrl: string = ''
   ): void {
+    this.finishPageLoad(tabId);
     if (tabId !== this.tabStore.activeTabId) {
       return;
     }
@@ -2855,6 +2987,9 @@ export struct BrowserShell {
     // from the prior process on a genuine cold launch.
     await this.repository?.clearSessionForColdStart();
     this.browserSettings = await this.repository?.loadSettings() ?? copyBrowserSettings(DEFAULT_BROWSER_SETTINGS);
+    this.siteSearchTemplates = await this.repository?.loadSiteSearchTemplates() ?? [];
+    this.readerSettings = await this.readerRepository?.loadSettings()
+      ?? normalizeReaderModeSettings(DEFAULT_READER_MODE_SETTINGS);
     const savedPageIcons: PageIconRecord[] = await this.repository?.listPageIcons() ?? [];
     const pageIconFileStore: PageIconFileStore | undefined = this.pageIconFileStore;
     this.pageIconItems = pageIconFileStore === undefined
@@ -2863,6 +2998,7 @@ export struct BrowserShell {
     this.pageIconRevision += 1;
     this.startPageItems = await this.repository?.listStartPageItems() ?? [];
     this.bookmarkItems = await this.repository?.listBookmarks() ?? [];
+    this.bookmarkFolderItems = await this.repository?.listBookmarkFolders() ?? [];
     this.syncStartPageBookmarks();
     this.ensureBookmarkSectionVisible();
     this.historyItems = await this.repository?.listHistory() ?? [];
@@ -3299,11 +3435,14 @@ export struct BrowserShell {
     // erase the query that the user entered, while an explicitly supplied URL
     // remains editable as its canonical URL even when it points at a search
     // engine.
-    const submittedMode: AddressBarPresentationMode = addressBarPresentationForInput(value);
+    const siteSearch: SiteSearchSuggestion | undefined = this.browserSettings.quickWebsiteSearchEnabled
+      ? siteSearchSuggestionForInput(value, this.siteSearchTemplates) : undefined;
+    const submittedMode: AddressBarPresentationMode = siteSearch === undefined
+      ? addressBarPresentationForInput(value) : AddressBarPresentationMode.SEARCH;
     const submittedQuery: string = submittedMode === AddressBarPresentationMode.SEARCH
       ? searchQueryTextFor(value)
       : '';
-    const url: string = normalizeAddressInput(
+    const url: string = siteSearch?.url ?? normalizeAddressInput(
       submittedMode === AddressBarPresentationMode.SEARCH ? submittedQuery : value,
       this.browserSettings.searchEngine,
       this.browserSettings.customSearchEngine
@@ -3471,8 +3610,15 @@ export struct BrowserShell {
     }
   }
 
-  private async onNewTab(): Promise<void> {
-    const tabId: TabId | undefined = await this.dispatcher?.createTab('about:blank', false);
+  private async onNewTab(hapticAlreadyTriggered: boolean = false): Promise<void> {
+    const dispatcher: DefaultBrowserCommandDispatcher | undefined = this.dispatcher;
+    if (dispatcher === undefined) {
+      return;
+    }
+    if (!hapticAlreadyTriggered) {
+      browserHaptics.light('tab-create');
+    }
+    const tabId: TabId | undefined = await dispatcher.createTab('about:blank', false);
     if (tabId === undefined) {
       return;
     }
@@ -3519,9 +3665,13 @@ export struct BrowserShell {
   private async commitNewStartTabFromEdge(): Promise<void> {
     const transitionToken: number = this.addressTransitionToken;
     const dispatcher: DefaultBrowserCommandDispatcher | undefined = this.dispatcher;
-    if (dispatcher === undefined) {
+    if (dispatcher === undefined || this.pendingTabDraft === undefined) {
       this.springBackAddressGesture();
       return;
+    }
+    if (!this.edgeNewTabHapticTriggered) {
+      browserHaptics.light('edge-tab-create');
+      this.edgeNewTabHapticTriggered = true;
     }
     this.gestureState = TabGestureState.COMMITTING;
     // Mount the handoff layer while the pending plus is still present. The
@@ -3655,8 +3805,15 @@ export struct BrowserShell {
     }, SAFARI_ADDRESS_HANDOFF_LEAD_IN_MS);
   }
 
-  private async onNewPrivateTab(): Promise<void> {
-    const tabId: TabId | undefined = await this.dispatcher?.createTab('about:blank', true);
+  private async onNewPrivateTab(hapticAlreadyTriggered: boolean = false): Promise<void> {
+    const dispatcher: DefaultBrowserCommandDispatcher | undefined = this.dispatcher;
+    if (dispatcher === undefined) {
+      return;
+    }
+    if (!hapticAlreadyTriggered) {
+      browserHaptics.light('private-tab-create');
+    }
+    const tabId: TabId | undefined = await dispatcher.createTab('about:blank', true);
     if (tabId === undefined) {
       return;
     }
@@ -3676,26 +3833,228 @@ export struct BrowserShell {
       fullScreen: this.pageDisplayState.fullScreen
     };
     this.rememberTabViewState();
-    this.browserSettings = {
-      searchEngine: this.browserSettings.searchEngine,
-      autoCloseTabs: this.browserSettings.autoCloseTabs,
-      contentBlockingEnabled: this.browserSettings.contentBlockingEnabled,
-      showFavorites: this.browserSettings.showFavorites,
-      showFrequentSites: this.browserSettings.showFrequentSites,
-      startPageSectionsConfigured: this.browserSettings.startPageSectionsConfigured,
-      startPageBackgroundId: this.browserSettings.startPageBackgroundId,
-      startPageBackgroundPosition: {
-        x: this.browserSettings.startPageBackgroundPosition.x,
-        y: this.browserSettings.startPageBackgroundPosition.y
-      },
-      startPageBackgroundScale: this.browserSettings.startPageBackgroundScale,
-      startPageAppearance: this.browserSettings.startPageAppearance,
-      defaultFontSize: size
-    };
+    const next: BrowserSettings = copyBrowserSettings(this.browserSettings);
+    next.defaultFontSize = size;
+    this.browserSettings = next;
     void this.repository?.saveSettings(this.browserSettings);
   }
 
+  private resetPageFeatures(tabId: TabId, nextUrl: string): void {
+    this.featureGenerationByTab.set(tabId, (this.featureGenerationByTab.get(tabId) ?? 0) + 1);
+    this.readerOperationByTab.set(tabId, (this.readerOperationByTab.get(tabId) ?? 0) + 1);
+    this.readerResultsByTab.delete(tabId);
+    this.readerBusyTabs.delete(tabId);
+    if (this.readerRequestedUrlByTab.get(tabId) !== nextUrl) {
+      this.readerRequestedUrlByTab.delete(tabId);
+    }
+    this.readerStateRevision += 1;
+  }
+
+  private featureContextCurrent(
+    tabId: TabId, controller: webview.WebviewController, url: string, generation: number
+  ): boolean {
+    return this.featureGenerationByTab.get(tabId) === generation &&
+      this.runtimePort?.controllerFor(tabId) === controller &&
+      this.urlForTab(tabId) === url &&
+      this.tabStore.tabs.some((tab: BrowserTabRecord) => tab.id === tabId);
+  }
+
+  private readerAvailableForRender(): boolean {
+    void this.readerStateRevision;
+    return !this.readerBusyTabs.has(this.sceneActiveTabId) &&
+      (this.readerResultsByTab.get(this.sceneActiveTabId)?.available ?? false);
+  }
+
+  private readerActiveForRender(): boolean {
+    void this.readerStateRevision;
+    return this.readerResultsByTab.get(this.sceneActiveTabId)?.active ?? false;
+  }
+
+  private siteSearchSuggestionForRender(): SiteSearchSuggestion | undefined {
+    return this.addressEditing && this.browserSettings.quickWebsiteSearchEnabled
+      ? siteSearchSuggestionForInput(this.addressDraft, this.siteSearchTemplates) : undefined;
+  }
+
+  private onSiteSearch(url: string): void {
+    const suggestion: SiteSearchSuggestion | undefined = this.siteSearchSuggestionForRender();
+    if (suggestion !== undefined && suggestion.url === url) {
+      this.submitAddressEditor(this.addressDraft);
+    }
+  }
+
+  private async discoverSiteSearch(
+    tabId: TabId, controller: webview.WebviewController, url: string, generation: number
+  ): Promise<void> {
+    const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+      (item: BrowserTabRecord) => item.id === tabId);
+    if (!this.browserSettings.quickWebsiteSearchEnabled || tab?.isPrivate !== false) {
+      this.siteSearchCandidatesByTab.delete(tabId);
+      return;
+    }
+    try {
+      const raw: string | null = await controller.runJavaScript(SITE_SEARCH_FORM_SCAN_SCRIPT);
+      if (!this.featureContextCurrent(tabId, controller, url, generation) ||
+          !this.browserSettings.quickWebsiteSearchEnabled || raw === null) {
+        return;
+      }
+      const parsed: Object | undefined = readWebScriptJson(raw);
+      const candidates: SiteSearchTemplate[] = [];
+      if (Array.isArray(parsed)) {
+        (parsed as SiteSearchFormSnapshot[]).forEach((form: SiteSearchFormSnapshot) => {
+          const template: SiteSearchTemplate | undefined = siteSearchTemplateFromForm(form, Date.now());
+          if (template !== undefined) {
+            candidates.push(template);
+          }
+        });
+      }
+      const previous: SiteSearchTemplate[] = this.siteSearchCandidatesByTab.get(tabId) ?? [];
+      const confirmed: SiteSearchTemplate[] = previous.concat(candidates).filter(
+        (template: SiteSearchTemplate) => siteSearchTemplateMatchesUrl(template, url));
+      this.siteSearchCandidatesByTab.set(tabId, candidates);
+      confirmed.forEach((template: SiteSearchTemplate) => {
+        template.lastUsedAt = Date.now();
+        this.siteSearchTemplates = upsertSiteSearchTemplate(this.siteSearchTemplates, template);
+        void this.repository?.upsertSiteSearchTemplate(template).catch(() => undefined);
+      });
+    } catch (_error) {
+      // A page without a verified GET search form remains a normal page.
+    }
+  }
+
+  private async refreshPageFeatures(tabId: TabId, controller: webview.WebviewController): Promise<void> {
+    const url: string = this.urlForTab(tabId);
+    const generation: number = this.featureGenerationByTab.get(tabId) ?? 0;
+    if (!this.featureGenerationByTab.has(tabId)) {
+      this.featureGenerationByTab.set(tabId, generation);
+    }
+    if (!this.featureContextCurrent(tabId, controller, url, generation)) {
+      return;
+    }
+    await this.discoverSiteSearch(tabId, controller, url, generation);
+    const reader: ReaderModeController | undefined = this.readerController;
+    if (reader === undefined || this.readerBusyTabs.has(tabId) ||
+        !this.featureContextCurrent(tabId, controller, url, generation)) {
+      return;
+    }
+    const operation: number = (this.readerOperationByTab.get(tabId) ?? 0) + 1;
+    this.readerOperationByTab.set(tabId, operation);
+    const result: ReaderModeResult = await reader.probe(controller, url);
+    hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+      'reader_probe status=%{public}s available=%{public}s reason=%{public}s',
+      result.status, result.available.toString(), result.reason ?? '');
+    if (!this.featureContextCurrent(tabId, controller, url, generation) ||
+        this.readerOperationByTab.get(tabId) !== operation) {
+      return;
+    }
+    this.readerResultsByTab.set(tabId, result);
+    this.readerStateRevision += 1;
+    if (result.available && !result.active &&
+        (this.readerRequestedUrlByTab.get(tabId) === url ||
+          autoReaderEnabledFor(url, this.readerSettings.autoReaderHosts))) {
+      await this.setReaderMode(tabId, true);
+    }
+  }
+
+  private async setReaderMode(tabId: TabId, enabled: boolean, showFeedback: boolean = false): Promise<void> {
+    const reader: ReaderModeController | undefined = this.readerController;
+    const controller: webview.WebviewController | undefined = this.runtimePort?.controllerFor(tabId);
+    if (reader === undefined || controller === undefined || this.readerBusyTabs.has(tabId)) {
+      return;
+    }
+    const url: string = this.urlForTab(tabId);
+    const generation: number = this.featureGenerationByTab.get(tabId) ?? 0;
+    const operation: number = (this.readerOperationByTab.get(tabId) ?? 0) + 1;
+    this.readerOperationByTab.set(tabId, operation);
+    this.readerBusyTabs.add(tabId);
+    this.readerStateRevision += 1;
+    const result: ReaderModeResult = enabled
+      ? await reader.enter(controller, url, this.readerSettings.preferences)
+      : await reader.exit(controller, url);
+    if (!this.featureContextCurrent(tabId, controller, url, generation) ||
+        this.readerOperationByTab.get(tabId) !== operation) {
+      return;
+    }
+    this.readerBusyTabs.delete(tabId);
+    this.readerResultsByTab.set(tabId, result);
+    if (result.active) {
+      this.readerRequestedUrlByTab.set(tabId, url);
+    } else {
+      this.readerRequestedUrlByTab.delete(tabId);
+    }
+    this.readerStateRevision += 1;
+    hilog.info(BROWSER_WEB_DOMAIN, BROWSER_WEB_TAG,
+      'reader_mode_result active=%{public}s status=%{public}s reason=%{public}s',
+      result.active.toString(), result.status, result.reason ?? '');
+    if (showFeedback && enabled && !result.active) {
+      this.showShareFeedback('此网页暂不支持阅读模式');
+    }
+    this.scheduleSnapshot(tabId, controller);
+  }
+
+  private toggleReaderMode(): void {
+    const tabId: TabId = this.tabStore.activeTabId;
+    const result: ReaderModeResult | undefined = this.readerResultsByTab.get(tabId);
+    if (result?.available || result?.active) {
+      void this.setReaderMode(tabId, !result.active, true);
+    }
+  }
+
+  private updateReaderSettings(settings: ReaderModeSettings): void {
+    this.readerSettings = normalizeReaderModeSettings(settings);
+    void this.readerRepository?.saveSettings(this.readerSettings).catch(() => {
+      this.showShareFeedback('阅读设置暂未保存，请重试');
+    });
+  }
+
+  private async applyActiveReaderPreferences(): Promise<void> {
+    const tabId: TabId = this.tabStore.activeTabId;
+    const reader: ReaderModeController | undefined = this.readerController;
+    const controller: webview.WebviewController | undefined = this.runtimePort?.controllerFor(tabId);
+    if (reader === undefined || controller === undefined ||
+        !this.readerResultsByTab.get(tabId)?.active || this.readerBusyTabs.has(tabId)) {
+      return;
+    }
+    const url: string = this.urlForTab(tabId);
+    const generation: number = this.featureGenerationByTab.get(tabId) ?? 0;
+    const operation: number = (this.readerOperationByTab.get(tabId) ?? 0) + 1;
+    this.readerOperationByTab.set(tabId, operation);
+    const result: ReaderModeResult = await reader.applyPreferences(controller, url, this.readerSettings.preferences);
+    if (this.featureContextCurrent(tabId, controller, url, generation) &&
+        this.readerOperationByTab.get(tabId) === operation) {
+      this.readerResultsByTab.set(tabId, result);
+      this.readerStateRevision += 1;
+    }
+  }
+
+  private onReaderTextSize(size: ReaderModeTextSize): void {
+    const next: ReaderModeSettings = normalizeReaderModeSettings(this.readerSettings);
+    next.preferences.textSize = size;
+    this.updateReaderSettings(next);
+    void this.applyActiveReaderPreferences();
+  }
+
+  private onReaderTheme(theme: ReaderModeTheme): void {
+    const next: ReaderModeSettings = normalizeReaderModeSettings(this.readerSettings);
+    next.preferences.theme = theme;
+    this.updateReaderSettings(next);
+    void this.applyActiveReaderPreferences();
+  }
+
+  private onReaderAutoChange(enabled: boolean): void {
+    const tab: BrowserTabRecord | undefined = this.activeTab();
+    if (tab === undefined || tab.isPrivate) {
+      return;
+    }
+    const next: ReaderModeSettings = normalizeReaderModeSettings(this.readerSettings);
+    next.autoReaderHosts = setAutoReaderHost(next.autoReaderHosts, this.urlForTab(tab.id), enabled, false);
+    this.updateReaderSettings(next);
+  }
+
   private onPageAction(action: PageAction): void {
+    if (action === PageAction.READER_MODE) {
+      this.toggleReaderMode();
+      return;
+    }
     if (action === PageAction.DOWNLOAD_MANAGER) {
       this.openDownloadManager();
       return;
@@ -3810,6 +4169,9 @@ export struct BrowserShell {
     }
     await repository.addBookmark(record, false);
     this.bookmarkItems = await repository.listBookmarks();
+    if (this.bookmarkItems.some((item: BookmarkRecord) => item.url === record.url)) {
+      browserHaptics.light('bookmark-create');
+    }
     this.syncStartPageBookmarks();
     this.ensureBookmarkSectionVisible();
   }
@@ -4050,6 +4412,9 @@ export struct BrowserShell {
       nextSettings.startPageBackgroundPosition.y !== this.browserSettings.startPageBackgroundPosition.y ||
       nextSettings.startPageBackgroundScale !== this.browserSettings.startPageBackgroundScale;
     this.browserSettings = nextSettings;
+    if (!nextSettings.quickWebsiteSearchEnabled) {
+      this.siteSearchCandidatesByTab.clear();
+    }
     if (backgroundChanged) {
       this.invalidateStartPageThumbnails();
     }
@@ -4121,6 +4486,7 @@ export struct BrowserShell {
       this.historyItems = await repository.listHistory();
       this.bumpHistoryRevision();
       this.bookmarkItems = await repository.listBookmarks();
+      this.bookmarkFolderItems = await repository.listBookmarkFolders();
     }
     this.showStartPageCustomize = false;
     this.showLibrary = true;
@@ -4131,13 +4497,41 @@ export struct BrowserShell {
     this.showLibrary = false;
   }
 
+  private async updateBookmark(originalUrl: string, title: string, url: string, folderId: string): Promise<boolean> {
+    const repository: BrowserRepository | undefined = this.repository;
+    if (repository === undefined || !(await repository.updateBookmark(originalUrl, title, url, folderId))) {
+      return false;
+    }
+    this.bookmarkItems = await repository.listBookmarks();
+    this.syncStartPageBookmarks();
+    return true;
+  }
+
+  private async createBookmarkFolder(name: string): Promise<BookmarkFolderRecord | undefined> {
+    const repository: BrowserRepository | undefined = this.repository;
+    if (repository === undefined) {
+      return undefined;
+    }
+    const folder: BookmarkFolderRecord | undefined = await repository.createBookmarkFolder(name);
+    if (folder !== undefined) {
+      this.bookmarkFolderItems = await repository.listBookmarkFolders();
+    }
+    return folder;
+  }
+
   private async removeBookmark(url: string): Promise<void> {
     const repository: BrowserRepository | undefined = this.repository;
     if (repository === undefined) {
       return;
     }
+    const bookmarksBefore: BookmarkRecord[] = await repository.listBookmarks();
+    const bookmarkWasPresent: boolean = bookmarksBefore.some((item: BookmarkRecord) => item.url === url);
     await repository.removeBookmark(url);
     this.bookmarkItems = await repository.listBookmarks();
+    const bookmarkWasRemoved: boolean = !this.bookmarkItems.some((item: BookmarkRecord) => item.url === url);
+    if (bookmarkWasPresent && bookmarkWasRemoved) {
+      browserHaptics.light('bookmark-delete');
+    }
     this.syncStartPageBookmarks();
   }
 
@@ -4255,6 +4649,9 @@ export struct BrowserShell {
 
   private async closeAllTabs(): Promise<void> {
     const tabs: BrowserTabRecord[] = this.tabStore.tabs.slice();
+    if (tabs.length > 0 && this.dispatcher !== undefined) {
+      browserHaptics.light('tabs-close-all');
+    }
     for (const tab of tabs) {
       if (!tab.isPrivate && tab.url !== 'about:blank') {
         this.closedTabStack.push(closedTabFromRecord(tab, Date.now()));
@@ -4294,6 +4691,7 @@ export struct BrowserShell {
       this.closeTabOverview();
       return;
     }
+    this.overviewOpenHapticTriggered = false;
     void this.openTabOverview();
   }
 
@@ -4303,6 +4701,10 @@ export struct BrowserShell {
     // otherwise the panel remains translucent at the release position.
     if (isOverviewSettled(this.overviewProgress)) {
       return;
+    }
+    if (!this.overviewOpenHapticTriggered) {
+      browserHaptics.light('overview-open');
+      this.overviewOpenHapticTriggered = true;
     }
     this.resetBottomChromeScroll();
     this.setTransitionStatusBarOpaque(true);
@@ -4534,6 +4936,10 @@ export struct BrowserShell {
    * lets a pull-down/back gesture interrupt that pending transition safely.
    */
   private async createNewTabFromOverview(isPrivate: boolean): Promise<void> {
+    if (this.dispatcher === undefined) {
+      return;
+    }
+    browserHaptics.light(isPrivate ? 'private-tab-create' : 'tab-create');
     const token: number = this.overviewTabRequestToken + 1;
     this.overviewTabRequestToken = token;
     if (shouldDismissOverviewBeforeCreatingTab(this.overviewProgress) ||
@@ -4546,9 +4952,9 @@ export struct BrowserShell {
       }
     }
     if (isPrivate) {
-      await this.onNewPrivateTab();
+      await this.onNewPrivateTab(true);
     } else {
-      await this.onNewTab();
+      await this.onNewTab(true);
     }
   }
 
@@ -5137,10 +5543,8 @@ export struct BrowserShell {
     if (this.hapticTriggered.has(tabId)) {
       return;
     }
-    // Haptic permission and device support are optional in this MVP. Keeping
-    // this one-shot boundary means a later vibrator adapter cannot run once
-    // per update frame or turn a successful close into an error.
     this.hapticTriggered.add(tabId);
+    browserHaptics.light('tab-close');
   }
 
   private animateCardClosed(tabId: TabId): void {
@@ -5237,6 +5641,9 @@ export struct BrowserShell {
     );
     if (targetTab === undefined) {
       return;
+    }
+    if (this.tabStore.activeTabId !== tabId) {
+      browserHaptics.light('overview-tab-switch');
     }
     this.setTransitionStatusBarOpaque(true);
     const currentIndexBefore: number = this.activeTabIndex();
@@ -5481,6 +5888,9 @@ export struct BrowserShell {
     this.primeOverviewSnapshots();
     this.gestureStartIndex = this.activeTabIndex();
     this.addressTransitionToken += 1;
+    this.overviewOpenHapticTriggered = false;
+    this.addressGestureTabSwitchHapticTriggered = false;
+    this.edgeNewTabHapticTriggered = false;
     this.addressGestureEngine.begin();
     this.addressGestureFinished = false;
     this.gestureActive = true;
@@ -5509,6 +5919,11 @@ export struct BrowserShell {
       this.gestureState = TabGestureState.DRAGGING;
       this.setTransitionStatusBarOpaque(true);
       this.overviewProgress = decision.progress;
+      if (decision.progress >= DEFAULT_GESTURE_PROFILE.overviewCommitProgress &&
+        !this.overviewOpenHapticTriggered) {
+        browserHaptics.light('overview-open');
+        this.overviewOpenHapticTriggered = true;
+      }
       // The upward reveal is a vertical page-to-overview transition. Do not
       // carry diagonal finger drift into the horizontal display track:
       // AddressTabStrip consumes displayDragX for tab placement, which would
@@ -5516,6 +5931,12 @@ export struct BrowserShell {
       this.applyTabGestureMotion(verticalOverviewGestureMotion());
     } else if (decision.axis === GestureAxis.HORIZONTAL) {
       this.gestureState = TabGestureState.DRAGGING;
+      const hasSwitchTarget: boolean = sample.dx > 0 ? this.hasPreviousTab() : this.hasNextTab();
+      if (hasSwitchTarget && decision.progress >= DEFAULT_GESTURE_PROFILE.tabSwitchCommitProgress &&
+        !this.addressGestureTabSwitchHapticTriggered) {
+        browserHaptics.light('swipe-tab-switch');
+        this.addressGestureTabSwitchHapticTriggered = true;
+      }
       const motion: TabGestureMotionState = tabGestureMotion(
         sample.dx,
         this.viewportWidth,
@@ -5524,6 +5945,12 @@ export struct BrowserShell {
       );
       if (motion.previewKind === TabPreviewKind.NEW_TAB && this.pendingTabDraft === undefined) {
         this.pendingTabDraft = this.dispatcher?.reserveTab('about:blank', false);
+      }
+      if (motion.previewKind === TabPreviewKind.NEW_TAB && this.pendingTabDraft !== undefined &&
+        (decision.progress >= DEFAULT_GESTURE_PROFILE.tabSwitchCommitProgress ||
+          motion.newTabProgress >= 1) && !this.edgeNewTabHapticTriggered) {
+        browserHaptics.light('edge-tab-create');
+        this.edgeNewTabHapticTriggered = true;
       }
       this.applyTabGestureMotion(motion);
       this.overviewProgress = 0;
@@ -5686,6 +6113,10 @@ export struct BrowserShell {
     if (targetId === undefined || this.dispatcher === undefined) {
       this.springBackAddressGesture();
       return;
+    }
+    if (!this.addressGestureTabSwitchHapticTriggered) {
+      browserHaptics.light('swipe-tab-switch');
+      this.addressGestureTabSwitchHapticTriggered = true;
     }
     // A final-tab preview is only valid for the left edge action. Existing
     // neighbour commits must not retain its render-only draft.
@@ -6138,7 +6569,17 @@ export struct BrowserShell {
         selectedFontSize: this.pageDisplayState.fontSize,
         webReady: this.pageActionsReady(),
         desktopMode: this.desktopModeByTab.get(this.sceneActiveTabId) ?? false,
+        readerAvailable: this.readerAvailableForRender(),
+        readerActive: this.readerActiveForRender(),
+        readerSettings: this.readerSettings,
+        siteSearchSuggestion: this.siteSearchSuggestionForRender(),
+        onSiteSearch: (url: string) => this.onSiteSearch(url),
+        onReaderTextSize: (size: ReaderModeTextSize) => this.onReaderTextSize(size),
+        onReaderTheme: (theme: ReaderModeTheme) => this.onReaderTheme(theme),
+        onReaderAutoChange: (enabled: boolean) => this.onReaderAutoChange(enabled),
         downloadProgress: this.downloadProgressForTab(this.sceneActiveTabId),
+        pageLoadProgress: this.pageLoadProgressForTab(this.sceneActiveTabId),
+        pageLoadOpacity: this.pageLoadOpacityForTab(this.sceneActiveTabId),
         overviewTransitionActive: this.overviewProgress > 0 || this.overviewClosing ||
           this.overviewAnimationClosing,
         overviewChromeFrame: this.overviewChromeFrameForRender(),
@@ -6331,6 +6772,8 @@ export struct BrowserShell {
               addressHandoffMounted: this.addressHandoffActive,
               addressHandoffProgress: this.addressHandoffProgress,
               downloadProgress: this.downloadProgressForTab(this.sceneActiveTabId),
+              pageLoadProgress: this.pageLoadProgressForTab(this.sceneActiveTabId),
+              pageLoadOpacity: this.pageLoadOpacityForTab(this.sceneActiveTabId),
               renderAddress: false,
               gestureState: String(this.gestureState),
               onOpenAddress: () => this.openAddressEditor(),
@@ -6394,8 +6837,7 @@ export struct BrowserShell {
             // The overview release animator drives this transform through the
             // same progress as the live page. Entry moves the bar downward;
             // reverse expansion brings it back from the bottom edge.
-            .opacity(this.overviewChromeFrameForRender().toolbarOpacity *
-              this.bottomChromeScrollOpacityForRender())
+            .opacity(this.bottomChromeScrollOpacityForRender())
             .scale({
               x: this.overviewChromeFrameForRender().toolbarScaleX * this.startPageCustomizeSqueezeScaleX(),
               y: this.overviewChromeFrameForRender().toolbarScaleY * this.startPageCustomizeSqueezeScaleY(),
@@ -6502,10 +6944,10 @@ export struct BrowserShell {
             .transition(
               TransitionEffect.asymmetric(
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({ curve: curves.springMotion() }),
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({
                     curve: curves.springMotion(
                       START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
@@ -6522,6 +6964,10 @@ export struct BrowserShell {
             history: this.historyItems,
             historyRevision: this.historyRevision,
             bookmarks: this.bookmarkItems,
+            bookmarkFolders: this.bookmarkFolderItems,
+            onCreateBookmarkFolder: (name: string) => this.createBookmarkFolder(name),
+            onUpdateBookmark: (originalUrl: string, title: string, url: string, folderId: string) =>
+              this.updateBookmark(originalUrl, title, url, folderId),
             pageIcons: this.pageIconItems,
             pageIconRevision: this.pageIconRevision,
             topInset: this.topAvoidInset,
@@ -6542,10 +6988,10 @@ export struct BrowserShell {
             .transition(
               TransitionEffect.asymmetric(
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({ curve: curves.springMotion() }),
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({
                     curve: curves.springMotion(
                       START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
@@ -6582,10 +7028,10 @@ export struct BrowserShell {
                 // Keep the entrance on the existing responsive spring. Only
                 // the disappearance gets the relaxed curve below.
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({ curve: curves.springMotion() }),
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({
                     curve: curves.springMotion(
                       START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
@@ -6630,10 +7076,10 @@ export struct BrowserShell {
             .transition(
               TransitionEffect.asymmetric(
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({ curve: curves.springMotion() }),
                 TransitionEffect.move(TransitionEdge.BOTTOM)
-                  .combine(TransitionEffect.OPACITY)
+
                   .animation({ curve: curves.springMotion() })
               )
             );
