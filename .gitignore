@@ -14,7 +14,7 @@
 # Local investigation and verification artifacts
 artifacts/
 diagnosis/
-docs/superpowers/
+/docs/
 verification/
 screenshots/
 /runtime-*
